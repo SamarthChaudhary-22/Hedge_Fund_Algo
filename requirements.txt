@@ -1,0 +1,7 @@
+alpaca-trade-api
+pandas
+numpy
+nltk
+python-dotenv
+requests
+scipy
