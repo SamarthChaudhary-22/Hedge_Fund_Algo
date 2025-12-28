@@ -1,0 +1,31 @@
+name: 24/7 Continuous Trader
+
+on:
+  schedule:
+    # Restart the bot every 6 hours (00:00, 06:00, 12:00, 18:00)
+    # The Python script handles the looping in between these starts.
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Manual run button
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # Set hard limit to 6 hours
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Hedge Fund Bot (Continuous Loop)
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+        run: python Hedge_Fund_Bot.py
