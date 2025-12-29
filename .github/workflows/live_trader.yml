@@ -6,6 +6,9 @@ on:
     # The Python script handles the looping in between these starts.
     - cron: '0 */6 * * *'
   workflow_dispatch: # Manual run button
+concurrency: 
+  group: live-trader
+  cancel-in-progress: true
 
 jobs:
   trade:
