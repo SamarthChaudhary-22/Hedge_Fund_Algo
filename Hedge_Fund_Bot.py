@@ -295,7 +295,7 @@ def run_hedge_fund():
         elif regime == 'TRENDING' and not is_panic:
             if price > sma_50:
                 sent_score, consensus = get_sentiment_consensus(symbol)
-                if sent_score >= 0.7:
+                if sent_score >= 0.6:
                     signal = 'buy'
                     reason = "Trend + News"
 
@@ -321,3 +321,4 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
