@@ -2,19 +2,20 @@ name: 24/7 Continuous Trader
 
 on:
   schedule:
-    # Restart the bot every 6 hours (00:00, 06:00, 12:00, 18:00)
-    # The Python script handles the looping in between these starts.
+    # Restart both bots every 6 hours (00:00, 06:00, 12:00, 18:00)
     - cron: '0 */6 * * *'
   workflow_dispatch: # Manual run button
-concurrency: 
+
+concurrency:
   group: live-trader
   cancel-in-progress: true
 
 jobs:
-  trade:
+  # --- JOB 1: THE LONG BOT (Bull) ---
+  long_strategy:
+    name: 🐂 Long Bot
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # Set hard limit to 6 hours
-
+    timeout-minutes: 360 # 6 Hours
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -27,9 +28,34 @@ jobs:
       - name: Install Dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Hedge Fund Bot (Continuous Loop)
+      - name: Run Hedge Fund Bot
         env:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
           PYTHONUNBUFFERED: '1'
         run: python Hedge_Fund_Bot.py
+
+  # --- JOB 2: THE SHORT BOT (Bear) ---
+  short_strategy:
+    name: 🐻 Short Bot
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # 6 Hours
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        # Note: Ensure 'yfinance' is in your requirements.txt!
+        run: pip install -r requirements.txt
+
+      - name: Run Grizzly Short Engine
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          PYTHONUNBUFFERED: '1'
+        run: python Short_Selling_Engine.py
