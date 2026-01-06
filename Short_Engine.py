@@ -25,7 +25,7 @@ HARD_STOP_PCT = 0.10  # 5% Hard Stop
 # STRATEGY THRESHOLDS
 ENTRY_Z_SHORT = -1.50  # Modified: Short if momentum is weak (Z > 1.0) AND Trend Broken
 EXIT_Z_SHORT = -0.50  # Cover when price returns to Mean (Fair Value)
-NEG_CONSENSUS_REQ = 0.81
+NEG_CONSENSUS_REQ = 0.30
 EARNINGS_LOOKAHEAD = 3
 
 # KEYWORDS
@@ -298,4 +298,5 @@ if __name__ == "__main__":
             print(f"CRITICAL ERROR in loop: {e}")
         print("Waiting 60 seconds...")
         time.sleep(60)
+
     print("--- 🔴 SESSION ENDING ---")
