@@ -26,7 +26,7 @@ PROFIT_GUARD = 0.03  # The 1% Sniper Rule
 
 # INTELLIGENCE
 NEWS_LIMIT = 30
-CONSENSUS_THRESHOLD = 0.70
+CONSENSUS_THRESHOLD = 0.35
 
 # HEDGING (The Shield)
 HEDGE_SYMBOL = 'GLD'
@@ -321,4 +321,5 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
 
