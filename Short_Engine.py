@@ -119,8 +119,10 @@ def get_earnings_status(symbol):
 
 def analyze_sentiment(symbol, mode='normal'):
     limit = 80 if mode == 'earnings' else 30
+    current_day = datetime.now().weekday()
+    lookback_hours = 72 if current_day == 0 else 24
     try:
-        start_time = (datetime.now() - timedelta(hours=72)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        start_time = (datetime.now() - timedelta(hours=lookback_hours)).strftime('%Y-%m-%dT%H:%M:%SZ')
         news_list = api.get_news(symbol=symbol, limit=limit, start=start_time)
         if not news_list: return 0.0, 0.0, 0
 
@@ -300,3 +302,4 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
+
