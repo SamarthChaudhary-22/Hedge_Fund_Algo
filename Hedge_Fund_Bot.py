@@ -56,8 +56,10 @@ def get_regime_map():
 
 
 def get_sentiment_consensus(symbol):
+    current_day = datetime.now().weekday()
+    lookback_hours = 72 if current_day == 0 else 24
     try:
-        start_time = (datetime.now() - timedelta(hours=72)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        start_time = (datetime.now() - timedelta(hours=lookback_hours)).strftime('%Y-%m-%dT%H:%M:%SZ')
         news_list = api.get_news(symbol=symbol, limit=NEWS_LIMIT, start=start_time)
         if not news_list: return 0.0, False
 
@@ -70,7 +72,7 @@ def get_sentiment_consensus(symbol):
                 neg_votes += 1
             total += 1
 
-        if total < 5: return 0.0, False
+        if total < 3: return 0.0, False
         if (pos_votes / total) >= CONSENSUS_THRESHOLD:
             return 1.0, True
         elif (neg_votes / total) >= CONSENSUS_THRESHOLD:
@@ -321,5 +323,6 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
