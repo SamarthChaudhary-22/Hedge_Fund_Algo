@@ -100,20 +100,56 @@ def get_technical_data(symbol):
 
 
 def get_earnings_status(symbol):
+    """
+    Robust check for upcoming earnings using yfinance.
+    Handles both Dict (new) and DataFrame (old) outputs.
+    """
     try:
         ticker = yf.Ticker(symbol)
         cal = ticker.calendar
-        if cal is None or cal.empty: return False, "N/A"
 
-        earnings_date = cal.iloc[0][0]
-        if not isinstance(earnings_date, datetime): return False, "N/A"
+        if cal is None:
+            return False, "N/A"
 
-        days_until = (earnings_date.replace(tzinfo=None) - datetime.now()).days
+        # 1. Handle New yfinance (Returns Dictionary)
+        if isinstance(cal, dict):
+            # The dictionary usually looks like: {'Earnings Date': [datetime.date(2025, 1, 20)]}
+            # We want the first date from the list
+            if 'Earnings Date' in cal:
+                dates = cal['Earnings Date']
+                if len(dates) > 0:
+                    earnings_date = dates[0]
+                else:
+                    return False, "N/A"
+            else:
+                # Fallback: Just grab the first available value
+                vals = list(cal.values())
+                if len(vals) > 0 and len(vals[0]) > 0:
+                    earnings_date = vals[0][0]
+                else:
+                    return False, "N/A"
+
+        # 2. Handle Old yfinance (Returns DataFrame)
+        elif not cal.empty:
+            earnings_date = cal.iloc[0][0]
+        else:
+            return False, "N/A"
+
+        # 3. Process the Date
+        # Ensure it's a datetime object (sometimes it's a datetime.date)
+        if not isinstance(earnings_date, datetime):
+            # Convert datetime.date to datetime
+            earnings_date = datetime.combine(earnings_date, datetime.min.time())
+
+        days_until = (earnings_date - datetime.now()).days
 
         if 0 <= days_until <= EARNINGS_LOOKAHEAD:
             return True, earnings_date.strftime('%Y-%m-%d')
         return False, "Later"
-    except:
+
+    except Exception as e:
+        # DEBUG: Print the actual error so we can see it in logs
+        # print(f"⚠️ Earn Error {symbol}: {e}") 
         return False, "Error"
 
 
