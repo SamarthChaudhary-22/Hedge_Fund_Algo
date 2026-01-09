@@ -84,6 +84,7 @@ def get_sentiment_consensus(symbol):
 
 def get_technical_data(symbol):
     try:
+        start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
         bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, limit=60).df
         if bars.empty: return None, None, None
 
@@ -222,7 +223,7 @@ def run_hedge_fund():
     for p in positions:
         symbol = p.symbol
         if symbol == HEDGE_SYMBOL: continue
-        
+
         qty = float(p.qty)
         entry = float(p.avg_entry_price)
         current = float(p.current_price)
