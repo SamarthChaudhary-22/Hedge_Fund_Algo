@@ -72,6 +72,7 @@ def get_technical_data(symbol):
     """
     try:
         # Fetch 100 days to ensure we have enough for SMA 50
+        start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
         bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, limit=100).df
         if bars.empty: return None, None, None
 
