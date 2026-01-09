@@ -222,14 +222,7 @@ def run_hedge_fund():
     for p in positions:
         symbol = p.symbol
         if symbol == HEDGE_SYMBOL: continue
-        price = p.current_price
-        price, z, sma_50= get_technical_data(symbol)
-        if price is None:
-            print(f"Skipping {symbol}, price not available.")
-            continue
-        print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA 50: {sma_50}")
-
-
+        
         qty = float(p.qty)
         entry = float(p.avg_entry_price)
         current = float(p.current_price)
@@ -286,7 +279,10 @@ def run_hedge_fund():
         if i % 10 == 0: print(f"Scanned {i}/{len(all_tickers)}...", end='\r')
 
         price, z, sma_50 = get_technical_data(symbol)
-        if price is None: continue
+        if price is None:
+            print(f"Skipping {symbol}, price not available.")
+            continue
+        print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA: {sma_50}")
         time.sleep(0.5)
 
         regime = regime_map.get(symbol, 'MEAN_REVERSION')
