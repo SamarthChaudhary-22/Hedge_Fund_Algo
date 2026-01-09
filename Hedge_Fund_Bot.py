@@ -222,6 +222,13 @@ def run_hedge_fund():
     for p in positions:
         symbol = p.symbol
         if symbol == HEDGE_SYMBOL: continue
+        price = p.current_price
+        price, z, sma_50= get_technical_data(symbol)
+        if price is None:
+            print(f"Skipping {symbol}, price not available.")
+            continue
+        print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA 50: {sma_50}")
+
 
         qty = float(p.qty)
         entry = float(p.avg_entry_price)
@@ -247,6 +254,7 @@ def run_hedge_fund():
             if regime == 'MEAN_REVERSION' and z > EXIT_Z and pct_profit > PROFIT_GUARD:
                 print(f"💰 TAKE PROFIT: {symbol} (Profit:{pct_profit:.2%} > {PROFIT_GUARD})")
                 place_order(symbol, qty, 'sell', current, 'take_profit')
+
 
     # --- 2. HUNTING TRADES ---
     if len(positions) >= MAX_POSITIONS:
@@ -323,6 +331,5 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
-
 
 
