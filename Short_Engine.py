@@ -253,6 +253,11 @@ def run_short_engine():
         if any(p.symbol == symbol for p in positions): continue
 
         is_earnings, earn_date = get_earnings_status(symbol)
+        price, z, sma_50 = get_technical_data(symbol)
+        if price is None:
+            print(f"Skipping {symbol}, price not available.")
+            continue
+        print(f"🔍Check {symbol}: price: {price} | z: {z} | sma_50: {sma_50} | Earnings: {earn_date} ")
 
         if is_earnings:
             print(f"👀 EARNINGS WATCH: {symbol} on {earn_date}...")
@@ -269,7 +274,6 @@ def run_short_engine():
         else:
             # TECHNICAL SHORT (Modified)
             price, z, sma_50 = get_technical_data(symbol)
-            if price is None: continue
 
             # REQUIREMENT: Price MUST be below 50-Day MA (Breakdown)
             if price < sma_50:
@@ -302,4 +306,3 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
-
