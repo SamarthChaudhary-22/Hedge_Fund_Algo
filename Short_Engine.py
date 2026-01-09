@@ -149,7 +149,7 @@ def get_earnings_status(symbol):
 
     except Exception as e:
         # DEBUG: Print the actual error so we can see it in logs
-        # print(f"⚠️ Earn Error {symbol}: {e}") 
+        # print(f"⚠️ Earn Error {symbol}: {e}")
         return False, "Error"
 
 
