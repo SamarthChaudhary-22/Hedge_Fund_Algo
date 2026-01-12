@@ -73,7 +73,7 @@ def get_technical_data(symbol):
     try:
         # Fetch 100 days to ensure we have enough for SMA 50
         start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
-        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=100).df
+        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=100, feed='iex').df
         if bars.empty: return None, None, None
 
         closes = bars['close'].values
@@ -414,3 +414,4 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
+
