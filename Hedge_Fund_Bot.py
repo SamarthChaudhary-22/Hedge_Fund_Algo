@@ -85,7 +85,7 @@ def get_sentiment_consensus(symbol):
 def get_technical_data(symbol):
     try:
         start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
-        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=100).df
+        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=100, feed='iex').df
         if bars.empty: return None, None, None
 
         closes = bars['close'].values
@@ -328,6 +328,7 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
 
