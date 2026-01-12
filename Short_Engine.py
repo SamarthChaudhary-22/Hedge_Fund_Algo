@@ -209,16 +209,57 @@ def get_total_short_exposure(account):
 
 
 def close_position(symbol, reason):
+    """
+        Smart Close: Uses Market Orders during the day,
+        and Limit Orders (Extended Hours) at night.
+        """
     try:
-        api.close_position(symbol)
-        print(f"💰 COVERING SHORT: {symbol} | {reason}")
+        # 1. Get info to determine Order Type
+        clock = api.get_clock()
+        qty = 0
+        try:
+            pos = api.get_position(symbol)
+            qty = abs(int(float(pos.qty)))
+            side = 'buy' if float(pos.qty) < 0 else 'sell'  # Short -> Buy to Cover
+        except:
+            print(f"⚠️ Cannot close {symbol}: Position not found.")
+            return
+
+        # 2. CANCEL OPEN ORDERS (To clear the path)
         orders = api.list_orders(status='open', symbols=[symbol])
         for o in orders:
             api.cancel_order(o.id)
             print(f"🗑️ Canceled Open Order for {symbol}")
+
+        # 3. EXECUTE CLOSE
+        if clock.is_open:
+            # NORMAL HOURS -> Market Order (Fastest)
+            api.close_position(symbol)
+            print(f"💰 MARKET CLOSE: {symbol} | {reason}")
+        else:
+            # EXTENDED HOURS -> Limit Order (Required)
+            # Fetch current price to set a limit
+            trade = api.get_latest_trade(symbol)
+            current_price = trade.price
+
+            # Set Limit Price with buffer (Buy high / Sell low to ensure fill)
+            # If Buying to cover: Pay 1% MORE to ensure fill
+            # If Selling to close: Accept 1% LESS to ensure fill
+            limit_price = round(current_price * 1.01, 2) if side == 'buy' else round(current_price * 0.99, 2)
+
+            api.submit_order(
+                symbol=symbol,
+                qty=qty,
+                side=side,
+                type='limit',
+                time_in_force='day',
+                limit_price=limit_price,
+                extended_hours=True  # <--- THE MAGIC KEY
+            )
+            print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} | {reason}")
+
     except Exception as e:
         print(f"❌ Failed to Close {symbol}: {e}")
-
 
 def place_short_order(symbol, qty, reason, stop_pct):
     try:
@@ -343,4 +384,3 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
-
