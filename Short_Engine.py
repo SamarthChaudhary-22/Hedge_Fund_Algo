@@ -291,6 +291,12 @@ def run_short_engine():
 
     # 1. MANAGE POSITIONS
     positions = api.list_positions()
+
+    # --- OPTIMIZATION: Count once here ---
+    shorts = [p for p in positions if int(p.qty) < 0]
+    short_count = len(shorts)
+    print(f"📉 Current Short Positions: {short_count}/{MAX_SHORT_POSITIONS}")
+
     for p in positions:
         if int(p.qty) >= 0: continue
 
@@ -300,14 +306,18 @@ def run_short_engine():
         qty = abs(int(p.qty))
         pct_profit = (entry_price - current_price) / entry_price
 
+        # STOP LOSS
         if pct_profit < -HARD_STOP_PCT:
             close_position(symbol, f"Stop Loss Hit ({pct_profit:.2%})")
+            short_count -= 1  # We closed one, so lower the count
             continue
 
+        # TAKE PROFIT
         _, z, _ = get_technical_data(symbol)
         if z is not None:
             if z < EXIT_Z_SHORT and pct_profit > 0.01:
                 close_position(symbol, f"Take Profit (Z:{z:.2f} < {EXIT_Z_SHORT})")
+                short_count -= 1  # We closed one, so lower the count
 
     # 2. PANIC & CAP CHECK
     is_panic = get_market_fear_index()
@@ -322,38 +332,56 @@ def run_short_engine():
             return
 
     # 3. SCANNING
+    # Fast exit if already full
+    if short_count >= MAX_SHORT_POSITIONS:
+        print("🛑 Max Short Positions Reached. Scanning Paused.")
+        return
+
     universe = get_sp500_universe()
     np.random.shuffle(universe)
     print(f"Scanning {len(universe)} stocks...")
 
     for symbol in universe:
         time.sleep(0.5)
+
+        # --- OPTIMIZATION: Check local count instead of calling API ---
+        if short_count >= MAX_SHORT_POSITIONS:
+            print("🛑 Portfolio Full. Ending Scan.")
+            break
+
         if any(p.symbol == symbol for p in positions): continue
 
         is_earnings, earn_date = get_earnings_status(symbol)
         price, z, sma_50 = get_technical_data(symbol)
+
         if price is None:
-            print(f"Skipping {symbol}, price not available.")
+            # print(f"Skipping {symbol}, price not available.")
             continue
-        print(f"🔍Check {symbol}: price: {price} | z: {z} | sma_50: {sma_50} | Earnings: {earn_date} ")
+
+        # Debug Print
+        print(f"🔍Check {symbol}: price: {price} | z: {z:.2f} | sma_50: {sma_50:.2f} | Earnings: {earn_date} ")
+
+        order_placed = False  # Flag to track if we trade
 
         if is_earnings:
-            print(f"👀 EARNINGS WATCH: {symbol} on {earn_date}...")
-            neg_ratio, avg_score, flags = analyze_sentiment(symbol, mode='earnings')
+            # EARNINGS PLAY
+            if earn_date != "Later" and earn_date != "Error":  # Safety check
+                print(f"👀 EARNINGS WATCH: {symbol} on {earn_date}...")
+                neg_ratio, avg_score, flags = analyze_sentiment(symbol, mode='earnings')
 
-            if neg_ratio >= NEG_CONSENSUS_REQ or flags >= 2:
-                reason = f"Earnings Disaster (Neg: {neg_ratio:.0%})"
-                print(f"💀 EARNINGS SIGNAL: {symbol} | {reason}")
+                if neg_ratio >= NEG_CONSENSUS_REQ or flags >= 2:
+                    reason = f"Earnings Disaster (Neg: {neg_ratio:.0%})"
+                    print(f"💀 EARNINGS SIGNAL: {symbol} | {reason}")
 
-                price = api.get_latest_trade(symbol).price
-                qty = int((equity * current_pos_size) / price)
-                if qty > 0: place_short_order(symbol, qty, reason, stop_pct=1.03)
+                    price = api.get_latest_trade(symbol).price
+                    qty = int((equity * current_pos_size) / price)
+                    if qty > 0:
+                        place_short_order(symbol, qty, reason, stop_pct=1.03)
+                        order_placed = True
 
         else:
-            # TECHNICAL SHORT (Modified)
-            price, z, sma_50 = get_technical_data(symbol)
-
-            # REQUIREMENT: Price MUST be below 50-Day MA (Breakdown)
+            # TECHNICAL PLAY
+            # Technical Data reused from above
             if price < sma_50:
                 if z > ENTRY_Z_SHORT:
                     neg_ratio, avg_score, flags = analyze_sentiment(symbol, mode='normal')
@@ -366,11 +394,13 @@ def run_short_engine():
 
                         price = api.get_latest_trade(symbol).price
                         qty = int((equity * current_pos_size) / price)
-                        if qty > 0: place_short_order(symbol, qty, reason, stop_pct=current_stop_buffer)
+                        if qty > 0:
+                            place_short_order(symbol, qty, reason, stop_pct=current_stop_buffer)
+                            order_placed = True
 
-        shorts = [p for p in api.list_positions() if int(p.qty) < 0]
-        if len(shorts) >= MAX_SHORT_POSITIONS: break
-
+        # --- OPTIMIZATION: Increment count locally ---
+        if order_placed:
+            short_count += 1
 
 if __name__ == "__main__":
     end_time = time.time() + (5.75 * 3600)
