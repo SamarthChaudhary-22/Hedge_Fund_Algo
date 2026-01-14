@@ -15,8 +15,8 @@ SECRET_KEY = os.getenv('APCA_API_SECRET_KEY')
 BASE_URL = "https://paper-api.alpaca.markets"
 
 # RISK & STRATEGY
-MAX_POSITIONS = 20
-CASH_BUFFER = 5000
+MAX_POSITIONS = 40
+CASH_BUFFER = 2000
 HARD_STOP_PCT = -0.10  # Tightened Stop Loss (Optimized)
 
 # OPTIMIZED ENTRY/EXIT (The Sniper Setup)
@@ -312,7 +312,7 @@ def run_hedge_fund():
                     reason = "Trend + News"
 
         if signal:
-            target_amount = equity / MAX_POSITIONS
+            target_amount = (equity * 1.50) / MAX_POSITIONS
             shares = int(target_amount / price)
             if shares > 0:
                 print(f"\n🚀 {signal.upper()}: {symbol} | {reason}")
@@ -333,6 +333,7 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
 
