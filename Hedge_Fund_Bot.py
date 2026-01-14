@@ -191,9 +191,9 @@ def run_hedge_fund():
     if is_panic:
         print("🚨 PANIC MODE ACTIVATED.")
 
-        # 1. LIQUIDATE ALL STOCKS (Match Optimizer Logic)
+        # 1. LIQUIDATE ALL LONG STOCKS
         for p in positions:
-            if p.symbol != HEDGE_SYMBOL:
+            if p.symbol != HEDGE_SYMBOL and float(p.qty) > 0:  # Only sell longs
                 print(f"😱 PANIC SELL: Liquidating {p.symbol}")
                 place_order(p.symbol, p.qty, 'sell', float(p.current_price), 'panic_liquidate')
 
@@ -204,8 +204,6 @@ def run_hedge_fund():
                 bars = api.get_bars(HEDGE_SYMBOL, tradeapi.rest.TimeFrame.Day, limit=1).df
                 if not bars.empty:
                     gld_price = bars.iloc[-1]['close']
-                    # Use available cash (which now includes proceeds from sales if they filled instantly,
-                    # but practically uses current settled cash + buffer)
                     qty = int((float(account.cash) * 0.20) / gld_price)
                     if qty > 0:
                         print(f"🛡️ HEDGING: Buying {qty} shares of {HEDGE_SYMBOL}")
@@ -220,15 +218,23 @@ def run_hedge_fund():
                     place_order(HEDGE_SYMBOL, p.qty, 'sell', float(p.current_price), 'hedge_exit')
 
     # --- 1. MANAGE POSITIONS ---
+    # Filter for Longs Only
+    longs = [p for p in positions if float(p.qty) > 0]
+    long_count = len(longs)
+    print(f"📈 Current Long Positions: {long_count}/{MAX_POSITIONS}")
+
     for p in positions:
         symbol = p.symbol
         if symbol == HEDGE_SYMBOL: continue
+
+        # SKIP SHORTS (Let the Short Engine handle them)
+        if float(p.qty) < 0: continue
 
         qty = float(p.qty)
         entry = float(p.avg_entry_price)
         current = float(p.current_price)
 
-        pct_profit = (current - entry) / entry if qty > 0 else (entry - current) / entry
+        pct_profit = (current - entry) / entry
 
         # STOP LOSS
         stop_thresh = HARD_STOP_PCT
@@ -236,27 +242,25 @@ def run_hedge_fund():
 
         if pct_profit < stop_thresh:
             print(f"🛑 STOP LOSS: {symbol} {pct_profit:.2%}")
-            place_order(symbol, abs(qty), 'sell' if qty > 0 else 'buy', current, 'stop_loss')
+            place_order(symbol, abs(qty), 'sell', current, 'stop_loss')
+            long_count -= 1  # Decrement count
             continue
 
         # TAKE PROFIT
-        if qty > 0:
-            regime = regime_map.get(symbol, 'MEAN_REVERSION')
-            _, z, _ = get_technical_data(symbol)
-            if z is None: continue
+        _, z, _ = get_technical_data(symbol)
+        if z is None: continue
 
-            if regime == 'MEAN_REVERSION' and z > EXIT_Z and pct_profit > PROFIT_GUARD:
-                print(f"💰 TAKE PROFIT: {symbol} (Profit:{pct_profit:.2%} > {PROFIT_GUARD})")
-                place_order(symbol, qty, 'sell', current, 'take_profit')
-
+        if regime_map.get(symbol, 'MEAN_REVERSION') == 'MEAN_REVERSION' and z > EXIT_Z and pct_profit > PROFIT_GUARD:
+            print(f"💰 TAKE PROFIT: {symbol} (Profit:{pct_profit:.2%} > {PROFIT_GUARD})")
+            place_order(symbol, qty, 'sell', current, 'take_profit')
+            long_count -= 1  # Decrement count
 
     # --- 2. HUNTING TRADES ---
-    if len(positions) >= MAX_POSITIONS:
-        print("Portfolio Full. No new buys.")
+    if long_count >= MAX_POSITIONS:
+        print("Portfolio Full (Longs). No new buys.")
         return
 
     # --- OPTIMIZED COOLDOWN CHECK ---
-    # Fetch the blacklist once BEFORE the loop starts
     print("Checking Cooldowns...")
     cooldown_blacklist = get_cooldown_list()
     print(f"Banned Symbols (Cooldown): {len(cooldown_blacklist)}")
@@ -272,19 +276,20 @@ def run_hedge_fund():
             print("Cash Buffer Hit. Stopping Scan.")
             break
         if symbol in held_symbols: continue
+        if symbol in cooldown_blacklist: continue
 
-        # FAST CHECK: Is symbol in blacklist?
-        if symbol in cooldown_blacklist:
-            continue
+        # Check Limit Inside Loop
+        if long_count >= MAX_POSITIONS:
+            print("Portfolio Full (Longs). Ending Scan.")
+            break
 
         if i % 10 == 0: print(f"Scanned {i}/{len(all_tickers)}...", end='\r')
+        time.sleep(0.5)
 
         price, z, sma_50 = get_technical_data(symbol)
         if price is None:
-            print(f"Skipping {symbol}, price not available.")
             continue
         print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA: {sma_50}")
-        time.sleep(0.5)
 
         regime = regime_map.get(symbol, 'MEAN_REVERSION')
         signal = None
@@ -314,8 +319,8 @@ def run_hedge_fund():
                 place_order(symbol, shares, signal, price, 'entry')
                 cash -= (shares * price)
                 held_symbols.add(symbol)
-                if len(held_symbols) >= MAX_POSITIONS: break
-
+                long_count += 1  # Increment count
+                if long_count >= MAX_POSITIONS: break
 
 if __name__ == "__main__":
     end_time = time.time() + (5.75 * 3600)
@@ -328,6 +333,7 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
 
