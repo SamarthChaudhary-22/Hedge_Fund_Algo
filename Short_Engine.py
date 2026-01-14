@@ -16,8 +16,8 @@ SECRET_KEY = os.getenv('APCA_API_SECRET_KEY')
 BASE_URL = "https://paper-api.alpaca.markets"
 
 # RISK MANAGEMENT
-MAX_SHORT_POSITIONS = 20
-POSITION_SIZE_NORMAL = 0.05  # 3% per trade
+MAX_SHORT_POSITIONS = 30
+POSITION_SIZE_NORMAL = 0.08  # 3% per trade
 POSITION_SIZE_PANIC = 0.03  # 1.5% (Defensive)
 PANIC_EXPOSURE_CAP = 0.30  # Max 30% account short
 HARD_STOP_PCT = 0.10  # 5% Hard Stop
@@ -414,4 +414,5 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
+
 
