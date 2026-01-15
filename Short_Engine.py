@@ -17,8 +17,8 @@ BASE_URL = "https://paper-api.alpaca.markets"
 
 # RISK MANAGEMENT
 MAX_SHORT_POSITIONS = 30
-POSITION_SIZE_NORMAL = 0.08  # 3% per trade
-POSITION_SIZE_PANIC = 0.05  # 1.5% (Defensive)
+POSITION_SIZE_NORMAL = 0.06  # 6% per trade
+POSITION_SIZE_PANIC = 0.04  # 4% (Defensive)
 PANIC_EXPOSURE_CAP = 0.30  # Max 30% account short
 HARD_STOP_PCT = 0.10  # 5% Hard Stop
 
@@ -414,6 +414,7 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
+
 
 
 
