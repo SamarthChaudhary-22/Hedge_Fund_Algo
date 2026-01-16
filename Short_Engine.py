@@ -293,7 +293,7 @@ def run_short_engine():
         if pct_profit > 0.05: stop_thresh = 0.02  # Profit drops to 2%
 
         # Tier 3: > 10% Profit -> Lock 5%
-        if pct_profit > 0.10: stop_thresh = 0.05
+        if pct_profit > 0.10: stop_thresh = 0.07
 
         # Check Stop Logic
         # Note: Stop threshold logic is tricky for shorts in terms of pct_profit.
@@ -411,3 +411,4 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
+
