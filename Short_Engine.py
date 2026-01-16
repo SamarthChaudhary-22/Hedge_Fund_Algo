@@ -237,12 +237,12 @@ def place_short_order(symbol, qty, reason, stop_pct):
         # Submitting Stop Loss
         api.submit_order(symbol, qty, 'buy', 'stop', stop_price=stop_price, time_in_force='gtc')
         print(f"🛡️ STOP LOSS SET: {symbol} @ ${stop_price}")
-        
+
         return True  # <--- NEW: Signal Success
 
     except Exception as e:
         print(f"❌ Short Failed: {e}")
-        return False # <--- NEW: Signal Failure
+        return False  # <--- NEW: Signal Failure
 
 def run_short_engine():
     print(f"--- 🐻 GRIZZLY SHORT ENGINE vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
@@ -373,8 +373,8 @@ def run_short_engine():
                     price = api.get_latest_trade(symbol).price
                     qty = int((equity * current_pos_size) / price)
                     if qty > 0:
-                        place_short_order(symbol, qty, reason, stop_pct=1.03)
-                        order_placed = True
+                        if place_short_order(symbol, qty, reason, stop_pct=1.03):
+                            order_placed = True
 
         else:
             # TECHNICAL SHORT (Optimized Momentum Logic)
@@ -392,8 +392,8 @@ def run_short_engine():
                         price = api.get_latest_trade(symbol).price
                         qty = int((equity * current_pos_size) / price)
                         if qty > 0:
-                            place_short_order(symbol, qty, reason, stop_pct=current_stop_buffer)
-                            order_placed = True
+                            if place_short_order(symbol, qty, reason, stop_pct=current_stop_buffer):
+                                order_placed = True
 
         if order_placed:
             short_count += 1
@@ -411,4 +411,3 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
-
