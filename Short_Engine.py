@@ -234,12 +234,15 @@ def place_short_order(symbol, qty, reason, stop_pct):
                              time_in_force='day', extended_hours=True)
             print(f"🌙 EXTENDED SHORT: {symbol} | {qty} @ {limit_price} | {reason}")
 
+        # Submitting Stop Loss
         api.submit_order(symbol, qty, 'buy', 'stop', stop_price=stop_price, time_in_force='gtc')
         print(f"🛡️ STOP LOSS SET: {symbol} @ ${stop_price}")
+        
+        return True  # <--- NEW: Signal Success
 
     except Exception as e:
         print(f"❌ Short Failed: {e}")
-
+        return False # <--- NEW: Signal Failure
 
 def run_short_engine():
     print(f"--- 🐻 GRIZZLY SHORT ENGINE vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
@@ -408,3 +411,4 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
+
