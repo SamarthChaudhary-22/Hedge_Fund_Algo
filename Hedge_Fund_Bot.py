@@ -18,10 +18,11 @@ BASE_URL = "https://paper-api.alpaca.markets"
 MAX_POSITIONS = 40
 CASH_BUFFER = 2000
 HARD_STOP_PCT = -0.10  # Tightened Stop Loss (Optimized)
+DAILY_TARGET_PCT = 0.015 # If Portfolio is up 1.5% today, Close All.
 
 # OPTIMIZED ENTRY/EXIT (The Sniper Setup)
-ENTRY_Z = -0.6  # Buy the crash
-EXIT_Z = 2.9  # "Always True" -> Relies purely on Profit Guard
+ENTRY_Z = -0.5  # Buy the crash
+EXIT_Z = 2.5  # "Always True" -> Relies purely on Profit Guard
 PROFIT_GUARD = 0.03  # The 1% Sniper Rule
 
 # INTELLIGENCE
@@ -32,7 +33,7 @@ CONSENSUS_THRESHOLD = 0.35
 HEDGE_SYMBOL = 'GLD'
 FEAR_SYMBOL = 'VIXY'
 MARKET_SYMBOL = 'SPY'
-FEAR_THRESHOLD = 0.05  # Optimized: Only hedge if VIX spikes 6%
+FEAR_THRESHOLD = 0.05  # Optimized: Only hedge if VIX spikes 5%
 
 # SETUP
 if not API_KEY: sys.exit("API Key Missing")
@@ -174,12 +175,21 @@ def get_cooldown_list():
 
 
 def run_hedge_fund():
-    print(f"--- 🐺 Hedge Fund vFinal (Optimized): {datetime.now(pytz.timezone('US/Eastern'))} ---")
+    print(f"--- 🐺 Hedge Fund vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
 
     regime_map = get_regime_map()
     account = api.get_account()
     equity = float(account.portfolio_value)
     cash = float(account.cash)
+
+    # --- 🆕 HARVEST CHECK (Daily Goal) ---
+    last_equity = float(account.last_equity)
+    daily_gain_pct = (equity - last_equity) / last_equity
+
+    harvest_mode = False
+    if daily_gain_pct >= DAILY_TARGET_PCT:
+        print(f"💰 DAILY GOAL HIT (+{daily_gain_pct:.2%})! Entering Harvest Mode.")
+        harvest_mode = True
 
     positions = api.list_positions()
     open_orders = api.list_orders(status='open')
@@ -190,14 +200,11 @@ def run_hedge_fund():
     is_panic = get_market_fear_index()
     if is_panic:
         print("🚨 PANIC MODE ACTIVATED.")
-
-        # 1. LIQUIDATE ALL LONG STOCKS
         for p in positions:
-            if p.symbol != HEDGE_SYMBOL and float(p.qty) > 0:  # Only sell longs
+            if p.symbol != HEDGE_SYMBOL and float(p.qty) > 0:
                 print(f"😱 PANIC SELL: Liquidating {p.symbol}")
                 place_order(p.symbol, p.qty, 'sell', float(p.current_price), 'panic_liquidate')
 
-        # 2. BUY HEDGE (Gold)
         if HEDGE_SYMBOL not in held_symbols:
             has_pending_gld = any(o.symbol == HEDGE_SYMBOL for o in open_orders)
             if not has_pending_gld:
@@ -209,7 +216,6 @@ def run_hedge_fund():
                         print(f"🛡️ HEDGING: Buying {qty} shares of {HEDGE_SYMBOL}")
                         place_order(HEDGE_SYMBOL, qty, 'buy', gld_price, 'hedge_entry')
     else:
-        # Risk On - Sell Gold
         for p in positions:
             if p.symbol == HEDGE_SYMBOL:
                 has_pending = any(o.symbol == HEDGE_SYMBOL for o in open_orders)
@@ -217,8 +223,7 @@ def run_hedge_fund():
                     print("✅ PANIC OVER: Selling Gold Hedge.")
                     place_order(HEDGE_SYMBOL, p.qty, 'sell', float(p.current_price), 'hedge_exit')
 
-    # --- 1. MANAGE POSITIONS ---
-    # Filter for Longs Only
+    # --- 1. MANAGE POSITIONS (With Harvest & Ratchet) ---
     longs = [p for p in positions if float(p.qty) > 0]
     long_count = len(longs)
     print(f"📈 Current Long Positions: {long_count}/{MAX_POSITIONS}")
@@ -226,41 +231,63 @@ def run_hedge_fund():
     for p in positions:
         symbol = p.symbol
         if symbol == HEDGE_SYMBOL: continue
-
-        # SKIP SHORTS (Let the Short Engine handle them)
-        if float(p.qty) < 0: continue
+        if float(p.qty) < 0: continue  # Skip Shorts
 
         qty = float(p.qty)
         entry = float(p.avg_entry_price)
         current = float(p.current_price)
-
         pct_profit = (current - entry) / entry
 
-        # STOP LOSS
-        stop_thresh = HARD_STOP_PCT
+        # --- 🌾 HARVEST LOGIC ---
+        # If we hit the daily goal, sell anything that is green.
+        if harvest_mode and pct_profit > 0:
+            print(f"✅ HARVEST: Closing {symbol} (+{pct_profit:.2%}) to bank Daily Goal.")
+            place_order(symbol, qty, 'sell', current, 'harvest_win')
+            long_count -= 1
+            continue
+
+        # --- 🛡️ THE RATCHET (Trailing Stop) ---
+        # (Your Original Logic Preserved)
+        stop_thresh = HARD_STOP_PCT  # Default -10%
+
+        # Tier 1: Secure the small win
+        if pct_profit > 0.02: stop_thresh = 0.00
+
+        # Tier 2: Secure the medium win
+        if pct_profit > 0.05: stop_thresh = 0.02
+
+        # Tier 3: Secure the big win
         if pct_profit > 0.10: stop_thresh = 0.05
 
         if pct_profit < stop_thresh:
-            print(f"🛑 STOP LOSS: {symbol} {pct_profit:.2%}")
-            place_order(symbol, abs(qty), 'sell', current, 'stop_loss')
-            long_count -= 1  # Decrement count
+            print(f"🛑 TRAILING STOP HIT: {symbol} Profit:{pct_profit:.2%} < Threshold:{stop_thresh:.2%}")
+            place_order(symbol, abs(qty), 'sell', current, 'trailing_stop')
+            long_count -= 1
             continue
 
-        # TAKE PROFIT
-        _, z, _ = get_technical_data(symbol)
-        if z is None: continue
+        # --- 💰 TAKE PROFIT ---
+        # Only take standard profit if NOT in Harvest Mode (Harvest handles greens anyway)
+        if not harvest_mode:
+            _, z, _ = get_technical_data(symbol)
+            if z is None: continue
 
-        if regime_map.get(symbol, 'MEAN_REVERSION') == 'MEAN_REVERSION' and z > EXIT_Z and pct_profit > PROFIT_GUARD:
-            print(f"💰 TAKE PROFIT: {symbol} (Profit:{pct_profit:.2%} > {PROFIT_GUARD})")
-            place_order(symbol, qty, 'sell', current, 'take_profit')
-            long_count -= 1  # Decrement count
+            if regime_map.get(symbol,
+                              'MEAN_REVERSION') == 'MEAN_REVERSION' and z > EXIT_Z and pct_profit > PROFIT_GUARD:
+                print(f"💰 TAKE PROFIT: {symbol} (Z:{z:.2f} > {EXIT_Z})")
+                place_order(symbol, qty, 'sell', current, 'take_profit')
+                long_count -= 1
 
     # --- 2. HUNTING TRADES ---
+
+    # 🛑 BLOCK NEW BUYS IF HARVEST MODE IS ON
+    if harvest_mode:
+        print("🛑 Harvest Mode Active: No new buys. Managing current positions only.")
+        return
+
     if long_count >= MAX_POSITIONS:
         print("Portfolio Full (Longs). No new buys.")
         return
 
-    # --- OPTIMIZED COOLDOWN CHECK ---
     print("Checking Cooldowns...")
     cooldown_blacklist = get_cooldown_list()
     print(f"Banned Symbols (Cooldown): {len(cooldown_blacklist)}")
@@ -278,7 +305,9 @@ def run_hedge_fund():
         if symbol in held_symbols: continue
         if symbol in cooldown_blacklist: continue
 
-        # Check Limit Inside Loop
+        # Double check harvest mode inside loop
+        if harvest_mode: break
+
         if long_count >= MAX_POSITIONS:
             print("Portfolio Full (Longs). Ending Scan.")
             break
@@ -287,8 +316,7 @@ def run_hedge_fund():
         time.sleep(0.5)
 
         price, z, sma_50 = get_technical_data(symbol)
-        if price is None:
-            continue
+        if price is None: continue
         print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA: {sma_50}")
 
         regime = regime_map.get(symbol, 'MEAN_REVERSION')
@@ -319,8 +347,9 @@ def run_hedge_fund():
                 place_order(symbol, shares, signal, price, 'entry')
                 cash -= (shares * price)
                 held_symbols.add(symbol)
-                long_count += 1  # Increment count
+                long_count += 1
                 if long_count >= MAX_POSITIONS: break
+
 
 if __name__ == "__main__":
     end_time = time.time() + (5.75 * 3600)
@@ -333,9 +362,5 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
-
-
-
-
 
 
