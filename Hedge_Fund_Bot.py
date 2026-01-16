@@ -257,7 +257,7 @@ def run_hedge_fund():
         if pct_profit > 0.05: stop_thresh = 0.02
 
         # Tier 3: Secure the big win
-        if pct_profit > 0.10: stop_thresh = 0.05
+        if pct_profit > 0.10: stop_thresh = 0.07
 
         if pct_profit < stop_thresh:
             print(f"🛑 TRAILING STOP HIT: {symbol} Profit:{pct_profit:.2%} < Threshold:{stop_thresh:.2%}")
@@ -362,5 +362,6 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
