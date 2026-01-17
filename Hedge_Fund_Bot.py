@@ -6,7 +6,7 @@ import sys
 import nltk
 import time
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pytz
 
 # --- 🏆 FINAL CONFIGURATION (Rank #1: 71,680% Return) ---
@@ -174,9 +174,44 @@ def get_cooldown_list():
         return set()
 
 
+def check_and_refresh_stale_orders():
+    """
+    Cancels any LIMIT order that has been open for >15 minutes.
+    This frees up buying power and allows the bot to place a fresh order
+    at the NEW price if the signal is still valid.
+    """
+    try:
+        # Get all open orders
+        orders = api.list_orders(status='open')
+
+        # Current time in UTC (Alpaca uses UTC)
+        now = datetime.now(timezone.utc)
+
+        for o in orders:
+            # Only check LIMIT orders (Market orders fill instantly)
+            # We also ignore STOP orders (those are supposed to sit forever)
+            if o.type != 'limit': continue
+
+            # Parse submission time
+            submitted_at = o.submitted_at
+            if isinstance(submitted_at, str):
+                # Convert string to datetime object
+                submitted_at = datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
+
+            # Calculate Age
+            age = now - submitted_at
+
+            if age > timedelta(minutes=15):
+                print(f"♻️ REFRESH: {o.side.upper()} {o.symbol} order is {age.seconds // 60}m old. Canceling...")
+                api.cancel_order(o.id)
+
+    except Exception as e:
+        print(f"⚠️ Stale Order Check Failed: {e}")
+
+
 def run_hedge_fund():
     print(f"--- 🐺 Hedge Fund vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
-
+    check_and_refresh_stale_orders()  #---Cleans up old limit orders
     regime_map = get_regime_map()
     account = api.get_account()
     equity = float(account.portfolio_value)
@@ -362,6 +397,5 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
-
 
 
