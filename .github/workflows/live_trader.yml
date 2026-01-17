@@ -59,3 +59,30 @@ jobs:
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
           PYTHONUNBUFFERED: '1'
         run: python Short_Engine.py
+
+        # --- JOB 3: THE DISCORD LISTENER (Notifications) ---
+  discord_listener:
+    name: 🎧 Discord Listener
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # 6 Hours
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        # Note: Ensure 'requests' is in your requirements.txt!
+        run: pip install -r requirements.txt
+
+      - name: Run Discord Listener
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          # Create this secret in GitHub or hardcode it in the script (Secret is safer)
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          PYTHONUNBUFFERED: '1'
+        run: python discord_listener.py
