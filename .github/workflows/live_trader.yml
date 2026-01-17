@@ -60,7 +60,7 @@ jobs:
           PYTHONUNBUFFERED: '1'
         # CHECK: Is your file named Short_Engine.py or Short_Selling_Engine.py?
         # I updated it to Short_Selling_Engine.py based on our chat history.
-        run: python Short_Selling_Engine.py
+        run: python Short_Engine.py
 
   # --- JOB 3: THE DISCORD LISTENER (Notifications) ---
   discord_listener:
@@ -87,4 +87,4 @@ jobs:
           # Remember to add DISCORD_WEBHOOK_URL to your GitHub Secrets!
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           PYTHONUNBUFFERED: '1'
-        run: python Discord_Listener.py
+        run: python discord_listener.py
