@@ -58,9 +58,11 @@ jobs:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
           PYTHONUNBUFFERED: '1'
-        run: python Short_Engine.py
+        # CHECK: Is your file named Short_Engine.py or Short_Selling_Engine.py?
+        # I updated it to Short_Selling_Engine.py based on our chat history.
+        run: python Short_Selling_Engine.py
 
-        # --- JOB 3: THE DISCORD LISTENER (Notifications) ---
+  # --- JOB 3: THE DISCORD LISTENER (Notifications) ---
   discord_listener:
     name: 🎧 Discord Listener
     runs-on: ubuntu-latest
@@ -82,7 +84,7 @@ jobs:
         env:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
-          # Create this secret in GitHub or hardcode it in the script (Secret is safer)
+          # Remember to add DISCORD_WEBHOOK_URL to your GitHub Secrets!
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           PYTHONUNBUFFERED: '1'
-        run: python discord_listener.py
+        run: python Discord_Listener.py
