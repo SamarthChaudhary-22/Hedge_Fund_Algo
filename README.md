@@ -53,7 +53,7 @@ Unlike standard trailing stops, our proprietary **Ratchet System** locks in prof
 -   **Hard Stop:** All positions have a catastrophic hard stop at **-10%**.
     
 
-### 4. 🌾 Harvest Mode (Global Take Profit)
+### 4. Harvest Mode (Global Take Profit)
 
 To prevent "giving back" daily gains, both bots communicate via a global equity check:
 
