@@ -1,30 +1,34 @@
 import os
 import requests
 import asyncio
+import logging
 from alpaca_trade_api.stream import Stream
 
 # --- CONFIGURATION ---
 API_KEY = os.getenv('APCA_API_KEY_ID')
 SECRET_KEY = os.getenv('APCA_API_SECRET_KEY')
 BASE_URL = "https://paper-api.alpaca.markets"
-
-# 🔴 PASTE YOUR DISCORD WEBHOOK URL HERE
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+processed_events = set()
 
 
 def send_discord_alert(message, color=None):
-    """
-    Sends a styled message to Discord.
-    Colors: Green (Success), Red (Failure/Stop), Blue (Info)
-    """
     if color == 'green':
-        color_code = 5763719  # 0x57F287
+        color_code = 5763719
     elif color == 'red':
-        color_code = 15548997  # 0xED4245
+        color_code = 15548997
     elif color == 'gold':
-        color_code = 16776960  # 0xFFFF00
+        color_code = 16776960
     else:
-        color_code = 3447003  # Blue
+        color_code = 3447003
 
     data = {
         "embeds": [
@@ -37,34 +41,34 @@ def send_discord_alert(message, color=None):
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=data)
     except Exception as e:
-        print(f"Failed to send Discord alert: {e}")
+        logger.error(f"Failed to send Discord alert: {e}")
 
 
 async def trade_update_handler(data):
-    """
-    Listens for real-time trade updates from Alpaca.
-    """
-    # data is an object. We access attributes directly.
     event = data.event
     order = data.order
 
+    # 1. GENERATE A UNIQUE ID FOR THIS EVENT
+    event_signature = f"{order['id']}_{event}_{order['filled_qty']}"
+
+    # 2. CHECK IF WE SAW THIS ALREADY
+    if event_signature in processed_events:
+        return  
+    # 3. ADD TO MEMORY
+    processed_events.add(event_signature)
+
+    if len(processed_events) > 1000:
+        processed_events.clear()
+
     symbol = order['symbol']
     side = order['side'].upper()
-    qty = order['qty']
+    filled_qty = order['filled_qty']
     price = order['filled_avg_price']
     order_type = order['type']
 
-    # We only care about FILLS (Full or Partial)
     if event == 'fill' or event == 'partial_fill':
 
-        # Calculate Value
-        total_value = float(qty) * float(price) if price else 0
-
-        # Determine Context (Entry vs Exit)
-        # If we Bought to Open (Long) or Sold to Open (Short), it's an ENTRY
-        # If we Sold to Close (Long) or Bought to Close (Short), it's an EXIT
-
-        # Simple Logic: Look at the Client Order ID to guess the intent
+        total_value = float(filled_qty) * float(price) if price else 0
         client_id = order.get('client_order_id', '')
 
         icon = "🔔"
@@ -95,35 +99,39 @@ async def trade_update_handler(data):
         msg = (
             f"**{icon} ORDER FILLED**\n"
             f"**Action:** {action}\n"
-            f"**Qty:** {qty} @ ${float(price):.2f}\n"
+            f"**Qty:** {filled_qty} @ ${float(price):.2f}\n"
             f"**Value:** ${total_value:,.2f}\n"
             f"**Type:** {order_type.upper()}"
         )
 
-        print(f"Sending Alert: {action}")
+        logger.info(f"Sending Alert: {action}")
         send_discord_alert(msg, color)
 
 
-def run_listener():
-    print("--- 🎧 DISCORD LISTENER ACTIVE ---")
-    print("Waiting for trade updates...")
+async def auto_disconnect():
+    # Wait 5 hours 55 minutes to restart cleanly before GitHub kills it
+    await asyncio.sleep(21300)
+    logger.warning("⏰ Time limit reached. Disconnecting...")
+    os._exit(0)
 
-    # Test Message
-    send_discord_alert("🤖 **Alpaca Bot Connected**\nListening for fills...", "blue")
+
+def run_listener():
+    logger.info("--- 🎧 DISCORD LISTENER ACTIVE (With De-Duplication & Logging) ---")
 
     stream = Stream(API_KEY, SECRET_KEY, base_url=BASE_URL, data_feed='iex')
     stream.subscribe_trade_updates(trade_update_handler)
 
+    loop = asyncio.get_event_loop()
+    loop.create_task(auto_disconnect())
+
     try:
-        stream.run()
+        loop.run_until_complete(stream.run())
     except Exception as e:
-        print(f"Stream Error: {e}")
-        # Auto-restart on error
+        logger.error(f"Stream Error: {e}")
         time.sleep(5)
         run_listener()
 
 
 if __name__ == "__main__":
     import time
-
     run_listener()
