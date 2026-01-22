@@ -90,7 +90,8 @@ def get_technical_data(symbol):
     """
     try:
         # 1. Fetch 60 days (Enough for 50SMA + 20CMF + Buffer)
-        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, limit=60).df
+        start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
+        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=300, feed='iex').df
 
         if bars.empty or len(bars) < 50:
             return None, None, None, None
@@ -386,7 +387,7 @@ def run_hedge_fund():
 
         price, z, sma_50, cmf_slope = get_technical_data(symbol)
         if price is None: continue
-        print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA: {sma_50} | CMF : {cmf_slope: .2f}")
+        print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA: {sma_50} | CMF: {cmf_slope:.2f}")
 
         regime = regime_map.get(symbol, 'MEAN_REVERSION')
         signal = None
@@ -431,6 +432,3 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
-
-
-
