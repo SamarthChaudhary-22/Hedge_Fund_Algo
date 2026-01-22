@@ -84,27 +84,61 @@ def get_sentiment_consensus(symbol):
 
 
 def get_technical_data(symbol):
+    """
+    FETCHES: Price, Z-Score (Blind), SMA50, CMF Slope
+    LOGIC: Matches Backtest Engine vFinal
+    """
     try:
-        start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
-        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=100, feed='iex').df
-        if bars.empty: return None, None, None
+        # 1. Fetch 60 days (Enough for 50SMA + 20CMF + Buffer)
+        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, limit=60).df
 
-        closes = bars['close'].values
-        current_price = closes[-1]
-        if current_price < 5.00: return None, None, None
+        if bars.empty or len(bars) < 50:
+            return None, None, None, None
 
-        if len(closes) >= 20:
-            mean_20 = np.mean(closes[-20:])
-            std_20 = np.std(closes[-20:])
-            z_score = (current_price - mean_20) / std_20 if std_20 > 0 else 0
-        else:
-            z_score = 0
+        # Data Prep
+        closes = bars['close']
+        highs = bars['high']
+        lows = bars['low']
+        volumes = bars['volume']
+        current_price = closes.iloc[-1]
 
-        sma_50 = np.mean(closes[-50:]) if len(closes) >= 50 else current_price
-        return current_price, z_score, sma_50
-    except:
-        return None, None, None
+        # 2. BLIND Z-SCORE (Shifted by 1 Day)
+        # We calculate mean/std on the HISTORY, excluding today to match backtest
+        # We look at the last 20 days *before* today
+        history = closes.iloc[:-1]
+        if len(history) < 20: return None, None, None, None
 
+        mean_20 = history.iloc[-20:].mean()
+        std_20 = history.iloc[-20:].std()
+
+        if std_20 == 0: return None, None, None, None
+        z_score = (current_price - mean_20) / std_20
+
+        # 3. SMA 50
+        sma_50 = closes.iloc[-50:].mean()
+
+        # 4. CMF (Chaikin Money Flow) & SLOPE
+        # Money Flow Multiplier
+        mfm = ((closes - lows) - (highs - closes)) / (highs - lows)
+        mfm = mfm.fillna(0)
+        mfv = mfm * volumes
+
+        # 20-period CMF
+        cmf = mfv.rolling(20).sum() / volumes.rolling(20).sum()
+
+        # CMF Slope (Current - 10 days ago)
+        # Ensure we have enough data for slope
+        if len(cmf) < 12: return None, None, None, None
+
+        cmf_current = cmf.iloc[-1]
+        cmf_prev = cmf.iloc[-11]  # 10 bars ago
+        cmf_slope = cmf_current - cmf_prev
+
+        return current_price, z_score, sma_50, cmf_slope
+
+    except Exception as e:
+        # print(f"⚠️ Metrics Error {symbol}: {e}")
+        return None, None, None, None
 
 def get_market_fear_index():
     try:
@@ -303,7 +337,7 @@ def run_hedge_fund():
         # --- 💰 TAKE PROFIT ---
         # Only take standard profit if NOT in Harvest Mode (Harvest handles greens anyway)
         if not harvest_mode:
-            _, z, _ = get_technical_data(symbol)
+            _, z, _, _ = get_technical_data(symbol)
             if z is None: continue
 
             if regime_map.get(symbol,
@@ -350,7 +384,7 @@ def run_hedge_fund():
         if i % 10 == 0: print(f"Scanned {i}/{len(all_tickers)}...", end='\r')
         time.sleep(0.5)
 
-        price, z, sma_50 = get_technical_data(symbol)
+        price, z, sma_50, cmf_slope = get_technical_data(symbol)
         if price is None: continue
         print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA: {sma_50}")
 
@@ -361,7 +395,7 @@ def run_hedge_fund():
         if is_panic and regime == 'TRENDING': continue
 
         if regime == 'MEAN_REVERSION':
-            if z < ENTRY_Z:
+            if z < ENTRY_Z and cmf_slope > 0 :
                 sent_score, consensus = get_sentiment_consensus(symbol)
                 if sent_score > -0.8:
                     signal = 'buy'
