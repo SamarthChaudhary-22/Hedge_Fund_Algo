@@ -66,7 +66,8 @@ def get_technical_data(symbol):
     """
     try:
         # 1. Fetch 60 days (Enough for 50SMA + 20CMF + Buffer)
-        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, limit=60).df
+        start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
+        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=300, feed='iex').df
 
         if bars.empty or len(bars) < 50:
             return None, None, None, None
