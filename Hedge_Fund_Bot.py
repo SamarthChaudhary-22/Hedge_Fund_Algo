@@ -386,7 +386,7 @@ def run_hedge_fund():
 
         price, z, sma_50, cmf_slope = get_technical_data(symbol)
         if price is None: continue
-        print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA: {sma_50}")
+        print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA: {sma_50} | CMF : {cmf_slope: .2f}")
 
         regime = regime_map.get(symbol, 'MEAN_REVERSION')
         signal = None
@@ -431,5 +431,6 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
