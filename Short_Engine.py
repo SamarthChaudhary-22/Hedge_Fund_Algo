@@ -60,31 +60,61 @@ def get_sp500_universe():
 
 
 def get_technical_data(symbol):
+    """
+    FETCHES: Price, Z-Score (Blind), SMA50, CMF Slope
+    LOGIC: Matches Backtest Engine vFinal
+    """
     try:
-        start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
-        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=100, feed='iex').df
-        if bars.empty: return None, None, None
+        # 1. Fetch 60 days (Enough for 50SMA + 20CMF + Buffer)
+        bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, limit=60).df
 
-        closes = bars['close'].values
-        current_price = closes[-1]
+        if bars.empty or len(bars) < 50:
+            return None, None, None, None
 
-        if current_price < 5.00: return None, None, None
+        # Data Prep
+        closes = bars['close']
+        highs = bars['high']
+        lows = bars['low']
+        volumes = bars['volume']
+        current_price = closes.iloc[-1]
 
-        if len(closes) >= 20:
-            mean_20 = np.mean(closes[-20:])
-            std_20 = np.std(closes[-20:])
-            z_score = (current_price - mean_20) / std_20 if std_20 > 0 else 0
-        else:
-            z_score = 0
+        # 2. BLIND Z-SCORE (Shifted by 1 Day)
+        # We calculate mean/std on the HISTORY, excluding today to match backtest
+        # We look at the last 20 days *before* today
+        history = closes.iloc[:-1]
+        if len(history) < 20: return None, None, None, None
 
-        if len(closes) >= 50:
-            sma_50 = np.mean(closes[-50:])
-        else:
-            sma_50 = current_price
+        mean_20 = history.iloc[-20:].mean()
+        std_20 = history.iloc[-20:].std()
 
-        return current_price, z_score, sma_50
-    except:
-        return None, None, None
+        if std_20 == 0: return None, None, None, None
+        z_score = (current_price - mean_20) / std_20
+
+        # 3. SMA 50
+        sma_50 = closes.iloc[-50:].mean()
+
+        # 4. CMF (Chaikin Money Flow) & SLOPE
+        # Money Flow Multiplier
+        mfm = ((closes - lows) - (highs - closes)) / (highs - lows)
+        mfm = mfm.fillna(0)
+        mfv = mfm * volumes
+
+        # 20-period CMF
+        cmf = mfv.rolling(20).sum() / volumes.rolling(20).sum()
+
+        # CMF Slope (Current - 10 days ago)
+        # Ensure we have enough data for slope
+        if len(cmf) < 12: return None, None, None, None
+
+        cmf_current = cmf.iloc[-1]
+        cmf_prev = cmf.iloc[-11]  # 10 bars ago
+        cmf_slope = cmf_current - cmf_prev
+
+        return current_price, z_score, sma_50, cmf_slope
+
+    except Exception as e:
+        # print(f"⚠️ Metrics Error {symbol}: {e}")
+        return None, None, None, None
 
 
 def get_earnings_status(symbol):
@@ -341,7 +371,7 @@ def run_short_engine():
         # --- 💰 TAKE PROFIT (Normal Mode) ---
         # Optimized Strategy: Cover into the Crash (Z < -2.0)
         if not harvest_mode:
-            _, z, _ = get_technical_data(symbol)
+            _, z, _, _ = get_technical_data(symbol)
             if z is not None:
                 if z < EXIT_Z_SHORT and pct_profit > 0.01:
                     close_position(symbol, f"Panic Cover (Z:{z:.2f} < {EXIT_Z_SHORT})")
@@ -387,12 +417,12 @@ def run_short_engine():
         if any(p.symbol == symbol for p in positions): continue
 
         is_earnings, earn_date = get_earnings_status(symbol)
-        price, z, sma_50 = get_technical_data(symbol)
+        price, z, sma_50, cmf_slope = get_technical_data(symbol)
 
         if price is None:
             continue
 
-        print(f"🔍Check {symbol}: price: {price} | z: {z:.2f} | sma_50: {sma_50:.2f} | Earnings: {earn_date} ")
+        print(f"🔍Check {symbol}: price: {price} | z: {z:.2f} | sma_50: {sma_50:.2f} | Earnings: {earn_date} | CMF_SLOPE: {cmf_slope:.2f}")
 
         order_placed = False
 
@@ -415,7 +445,7 @@ def run_short_engine():
             # TECHNICAL SHORT (Optimized Momentum Logic)
             if price < sma_50:
                 # ENTRY CONDITION: Trend Breakdown (Z > -1.75 is almost always true if price < SMA50)
-                if z > ENTRY_Z_SHORT:
+                if z > ENTRY_Z_SHORT and cmf_slope < 0:
                     neg_ratio, avg_score, flags = analyze_sentiment(symbol, mode='normal')
 
                     if avg_score > 0.2:
