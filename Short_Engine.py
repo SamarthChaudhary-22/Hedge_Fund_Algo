@@ -452,7 +452,7 @@ def run_short_engine():
                     if avg_score > 0.2:
                         print(f"✋ SKIP {symbol}: Breakdown but News is Good")
                     else:
-                        reason = f"Breakdown Short (Price < SMA50 & Z:{z:.2f})"
+                        reason = f"Breakdown Short (Price < SMA50 & Z:{z:.2f} | CMF Slope: {cmf_slope:.2f})"
                         print(f"📉 TECHNICAL SIGNAL: {symbol} | {reason}")
 
                         price = api.get_latest_trade(symbol).price
@@ -477,3 +477,4 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
+
