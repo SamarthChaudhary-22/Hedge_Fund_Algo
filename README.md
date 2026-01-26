@@ -1,4 +1,4 @@
-﻿#  Grizzly & Bull: AI-Powered Quantitative Hedge Fund
+﻿#  Grizzly & Bull: ML-Powered Quantitative Hedge Fund
 
 **A sophisticated, dual-engine automated trading system designed for Alpaca Markets.**
 
