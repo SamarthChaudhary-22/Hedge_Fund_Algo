@@ -20,6 +20,7 @@ MAX_POSITIONS = 40
 CASH_BUFFER = 2000
 HARD_STOP_PCT = -0.10  # Tightened Stop Loss (Optimized)
 DAILY_TARGET_PCT = 0.015 # If Portfolio is up 1.5% today, Close All.
+HEDGE_RESERVE_PCT = 0.02
 
 # OPTIMIZED ENTRY/EXIT (The Sniper Setup)
 ENTRY_Z = -0.5  # Buy the crash
@@ -252,6 +253,9 @@ def run_hedge_fund():
     account = api.get_account()
     equity = float(account.portfolio_value)
     cash = float(account.cash)
+    buying_power = float(account.buying_power)
+    hedge_reserve = equity * HEDGE_RESERVE_PCT
+    print(f"Equity: ${equity} | BP: {buying_power} | Hedge Reserve: {hedge_reserve}")
 
     # --- 🆕 HARVEST CHECK (Daily Goal) ---
     last_equity = float(account.last_equity)
