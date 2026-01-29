@@ -53,7 +53,7 @@ async def trade_update_handler(data):
 
     # 2. CHECK IF WE SAW THIS ALREADY
     if event_signature in processed_events:
-        return  
+        return
     # 3. ADD TO MEMORY
     processed_events.add(event_signature)
 
@@ -66,7 +66,9 @@ async def trade_update_handler(data):
     price = order['filled_avg_price']
     order_type = order['type']
 
-    if event == 'fill' or event == 'partial_fill':
+    is_option = len(symbol) > 6
+
+    if event == 'fill':
 
         total_value = float(filled_qty) * float(price) if price else 0
         client_id = order.get('client_order_id', '')
@@ -74,6 +76,10 @@ async def trade_update_handler(data):
         icon = "🔔"
         color = "blue"
         action = f"{side} {symbol}"
+        if is_option:
+            icon = "🧱"
+            color = "magenta"
+            action = f"OPTION: {symbol}"
 
         if "harvest" in client_id:
             icon = "🌾"
@@ -110,7 +116,7 @@ async def trade_update_handler(data):
 
 async def auto_disconnect():
     # Wait 5 hours 55 minutes to restart cleanly before GitHub kills it
-    await asyncio.sleep(21300)
+    await asyncio.sleep(20700)
     logger.warning("⏰ Time limit reached. Disconnecting...")
     os._exit(0)
 
