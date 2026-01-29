@@ -1,3 +1,5 @@
+from sys import exception
+
 import alpaca_trade_api as tradeapi
 import pandas as pd
 import numpy as np
@@ -9,7 +11,7 @@ from datetime import datetime, timedelta, date
 from scipy.stats import norm
 import pytz
 
-# --- 🧠 SMART HEDGE: OMNI EDITION (INSTITUTIONAL GRADE) ---
+
 API_KEY = os.getenv('APCA_API_KEY_ID')
 SECRET_KEY = os.getenv('APCA_API_SECRET_KEY')
 BASE_URL = "https://paper-api.alpaca.markets"
@@ -64,14 +66,24 @@ def calculate_greeks(S, K, T, r, sigma, type='put'):
 # --- 📊 MARKET INTERNALS ---
 def get_market_internals():
     try:
-        daily = api.get_bars('SPY', tradeapi.rest.TimeFrame.Day, limit=30).df
+        start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+        daily = api.get_bars('SPY', tradeapi.rest.TimeFrame.Day, start=start_date, feed='iex').df
+        daily = daily.tail(30)
         if len(daily) < 20: return None, 0, 0, 0, 0
 
         daily['returns'] = np.log(daily['close'] / daily['close'].shift(1))
         rv_20d = daily['returns'].tail(20).std() * math.sqrt(252)
         prev_close = daily.iloc[-1]['close']
 
-        intraday = api.get_bars('SPY', tradeapi.rest.TimeFrame(15, tradeapi.rest.TimeFrameUnit.Minute), limit=20).df
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        intraday = api.get_bars('SPY', tradeapi.rest.TimeFrame(15, tradeapi.rest.TimeFrameUnit.Minute), start=today_str, limit=50, feed='iex').df
+        if intraday.empty:
+            start_yesterday = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
+            intraday = api.get_bars('SPY', tradeapi.rest.TimeFrame(15, tradeapi.rest.TimeFrameUnit.Minute), start=start_yesterday, limit=50, feed='iex').df
+
+        if intraday.empty:
+            return None, 0, 0, 0, 0
+
         current_price = intraday.iloc[-1]['close']
         high_low = (intraday['high'] - intraday['low']).mean()
         atr_pct = high_low / current_price
@@ -82,7 +94,8 @@ def get_market_internals():
         iv_est = get_real_iv_snapshot(current_price)
 
         return current_price, atr_pct, gap_pct, rv_20d, iv_est
-    except:
+    except Exception as e:
+        print(f"Data Error: {e}")
         return None, 0, 0, 0, 0
 
 
@@ -121,7 +134,7 @@ def find_real_quote(symbol):
         return 0
 
 
-# --- 🔍 OMNI-TIER CONTRACT SELECTION ---
+# --- CONTRACT SELECTION ---
 def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_val=0.50):
     today = date.today()
     exp_date = (today + timedelta(days=days_out)).strftime('%Y-%m-%d')
