@@ -145,15 +145,24 @@ def get_technical_data(symbol):
 
 def get_market_fear_index():
     try:
-        vix_bars = api.get_bars(FEAR_SYMBOL, tradeapi.rest.TimeFrame.Day, limit=2).df
+        vix_start = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
+        vix_bars = api.get_bars(FEAR_SYMBOL, tradeapi.rest.TimeFrame.Day, start=vix_start, limit=10).df
         if len(vix_bars) < 2: return False
+        current_bar = vix_bars.iloc[-1]
+        prev_bar = vix_bars.iloc[-2]
 
-        vix_change = (vix_bars.iloc[-1]['close'] - vix_bars.iloc[-2]['close']) / vix_bars.iloc[-2]['close']
-        if vix_change > FEAR_THRESHOLD:
-            print(f"⚠️ HIGH VOLATILITY ALERT: {FEAR_SYMBOL} up {vix_change:.2%}")
+        current = current_bar['close']
+        open_price = current_bar['open']
+        prev_close = prev_bar['close']
+        daily_change = (current - prev_close) / prev_close
+        intraday_change = (current - open_price) / open_price
+
+        if daily_change > FEAR_THRESHOLD or intraday_change > FEAR_THRESHOLD:
+            print(f"⚠️ Volatility Spike : Daily = {daily_change:.1%} | Intraday = {intraday_change:.1%}")
             return True
         return False
-    except:
+    except Exception as e:
+        print(f"Error in get_market_fear_index: {e}")
         return False
 
 
@@ -255,7 +264,11 @@ def run_hedge_fund():
     cash = float(account.cash)
     buying_power = float(account.buying_power)
     hedge_reserve = equity * HEDGE_RESERVE_PCT
-    print(f"Equity: ${equity} | BP: {buying_power} | Hedge Reserve: {hedge_reserve}")
+    print(f"Equity: ${equity} | BP: {buying_power} | Hedge Reserve: {hedge_reserve:.2%}")
+    insufficient_funds = buying_power < hedge_reserve
+
+    if insufficient_funds:
+        print(f"⛔ Reserving BP For Hedge: BP: ${buying_power: ,.2f} | Hedge Reserve: ${hedge_reserve: ,.2f}")
 
     # --- 🆕 HARVEST CHECK (Daily Goal) ---
     last_equity = float(account.last_equity)
@@ -380,7 +393,9 @@ def run_hedge_fund():
         Smart_Hedge.close_all_hedges()
 
     # --- 2. HUNTING TRADES ---
-
+    if insufficient_funds:
+        print(f"👮🏻 Stopping Scan, Preserving BP For Hedging: BP:${buying_power: ,.2f} | Hedge Reserve: ${hedge_reserve: ,.2f}")
+        return
     # 🛑 BLOCK NEW BUYS IF HARVEST MODE IS ON
     if harvest_mode:
         print("🛑 Harvest Mode Active: No new buys. Managing current positions only.")
