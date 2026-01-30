@@ -8,6 +8,7 @@ import time
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from datetime import datetime, timedelta, timezone
 import pytz
+import yfinance as yf
 import smart_hedge as Smart_Hedge
 
 # --- 🏆 FINAL CONFIGURATION (Rank #1: 71,680% Return) ---
@@ -176,29 +177,48 @@ def place_order(symbol, qty, side, current_price, order_type_label="manual"):
             api.submit_order(symbol, qty, side, 'market', 'gtc', client_order_id=unique_id)
             print(f"✅ MARKET ORDER ({order_type_label}): {side} {symbol} ({qty})")
         else:
+            yf_ticker = yf.Ticker(symbol)
             quote = api.get_latest_quote(symbol)
+
+            try:
+                yf_price = yf_ticker.fast_info['last_price']
+            except:
+                yf_price = 0
+
             if side == 'buy':
-                current_price = quote.ask_price
-                if current_price == 0: current_price = quote.bid_price
+                current_price = yf_price
+                if current_price is None or current_price == 0:
+                    print(f"⚠️ Yahoo Failed/Zero for {symbol}. Using IEX Ask.")
+                    current_price = quote.ask_price
+                if current_price == 0:
+                    current_price = quote.bid_price
                 limit_price = round(current_price * 1.01,2)
+
             else:
-                current_price = quote.bid_price
-                if current_price == 0: current_price = quote.ask_price
+                current_price = yf_price
+                if current_price is None or current_price == 0:
+                    print(f"⚠️ Yahoo Failed/Zero for {symbol}. Using IEX Ask.")
+                    current_price = quote.bid_price
+                if current_price == 0:
+                    current_price = quote.ask_price
                 limit_price = round(current_price * 0.99,2)
-            if current_price == 0:
-                print(f"⚠️ DATA ERROR: Could not fetch valid quote for {symbol}. Skipping.")
+
+            if current_price == 0 or current_price is None:
+                print(f"⚠️ DATA ERROR: Could not fetch valid quote for {symbol} from ANY source. Skipping.")
                 return
+
             api.submit_order(
-                symbol = symbol,
-                qty = qty,
-                side = side,
+                symbol=symbol,
+                qty=qty,
+                side=side,
                 type = 'limit',
-                time_in_force = 'day',
-                limit_price =limit_price,
-                extended_hours = True,
-                client_order_id = unique_id
+                time_in_force='day',
+                limit_price=limit_price,
+                extended_hours=True,
+                client_order_id=unique_id
             )
             print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} (Ref: {current_price})")
+
     except Exception as e:
         print(f"❌ Error closing {symbol}: {e}")
 
