@@ -101,6 +101,32 @@ def get_market_internals():
         return None, 0, 0, 0, 0
 
 
+def fetch_option_contracts_manual(symbol, expiration_date=None):
+    """
+    Manually fetches option contracts using the raw REST endpoint
+    because 'alpaca-trade-api' is missing the helper function.
+    """
+    params = {
+        'underlying_symbols': symbol,
+        'status': 'active',
+        'limit': 1000  # Max limit to ensure we get them all
+    }
+    if expiration_date:
+        params['expiration_date'] = expiration_date
+
+    try:
+        # We use the raw .get() method which bypasses the missing SDK function
+        # Note: The endpoint is '/v2/options/contracts'
+        response = api.get('/options/contracts', data=params)
+
+        # The raw response is a dict, we need to convert it to a friendly object
+        # or just work with the dict directly.
+        return response['option_contracts']
+    except Exception as e:
+        print(f"⚠️ Manual Contract Fetch Failed: {e}")
+        return []
+
+
 def get_real_iv_snapshot(spy_price):
     """"
     Fetches ATM IV. Priority: Alpaca -> Yahoo -> Manual Estimate
@@ -109,14 +135,21 @@ def get_real_iv_snapshot(spy_price):
         # 1. Get Contract Name from Alpaca
         today = date.today()
         exp = (today + timedelta(days=5)).strftime('%Y-%m-%d')
-        contracts = api.get_option_contracts('SPY', expiration_date=exp, option_type='put').option_contracts
 
-        if not contracts: return 0.15 # Fallback
+        # 🚨 FIX: Use the manual fetcher instead of api.get_option_contracts
+        contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp)
+
+        if not contracts_data: return 0.15
+
+        # Helper to safely get strike price from dict or object
+        def get_strike(c):
+            return float(c['strike_price']) if isinstance(c, dict) else float(c.strike_price)
 
         # Find ATM Contract
-        atm_c = min(contracts, key=lambda x: abs(float(x.strike_price) - spy_price))
-        symbol = atm_c.symbol
+        atm_c = min(contracts_data, key=lambda x: abs(get_strike(x) - spy_price))
 
+        # Handle Symbol (Dict vs Object)
+        symbol = atm_c['symbol'] if isinstance(atm_c, dict) else atm_c.symbol
         # 2. Try Alpaca IV
         try:
             snap = api.get_option_snapshot(symbol)
@@ -193,20 +226,20 @@ def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_v
     T = days_out / 365.0
 
     try:
-        contracts = api.get_option_contracts(
-            'SPY', status='active', expiration_date=exp_date, option_type='put'
-        ).option_contracts
+        contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_date)
 
-        if not contracts:
+        if not contracts_data:
+            # Try next day
             exp_date = (today + timedelta(days=days_out + 1)).strftime('%Y-%m-%d')
-            contracts = api.get_option_contracts('SPY', status='active', expiration_date=exp_date,
-                                                 option_type='put').option_contracts
+            contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_date)
 
-        if not contracts: return None, 0, {}
+        if not contracts_data: return None, 0, {}
 
         candidates = []
-        for c in contracts:
-            strike = float(c.strike_price)
+        for c in contracts_data:
+            # Handle Dict access for manual fetch
+            strike = float(c['strike_price']) if isinstance(c, dict) else float(c.strike_price)
+            symbol = c['symbol'] if isinstance(c, dict) else c.symbol
             if not (0.75 * spy_price < strike < 1.05 * spy_price): continue
 
             greeks = calculate_greeks(spy_price, strike, T, 0.05, iv_est, 'put')
@@ -415,10 +448,12 @@ def check_vega_exit():
 
 
 def submit_order(contract, qty, price, label):
+    symbol = contract['symbol'] if isinstance(contract, dict) else contract.symbol
+
     limit = round(price * 1.01, 2)
-    print(f"👉 EXEC {label}: {qty}x {contract.symbol} @ ${limit}")
+    print(f"👉 EXEC {label}: {qty}x {symbol} @ ${limit}")
     try:
-        api.submit_order(symbol=contract.symbol, qty=qty, side='buy', type='limit', limit_price=limit,
+        api.submit_order(symbol=symbol, qty=qty, side='buy', type='limit', limit_price=limit,
                          time_in_force='day')
     except Exception as e:
         print(f"Order Error: {e}")
@@ -442,4 +477,3 @@ def close_all_hedges():
 
 if __name__ == "__main__":
     execute_omni_hedge()
-
