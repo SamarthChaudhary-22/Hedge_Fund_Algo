@@ -308,7 +308,7 @@ def run_hedge_fund():
     cash = float(account.cash)
     buying_power = float(account.buying_power)
     hedge_reserve = equity * HEDGE_RESERVE_PCT
-    print(f"Equity: ${equity} | BP: {buying_power} | Hedge Reserve: {hedge_reserve:.2%}")
+    print(f"Equity: ${equity} | BP: {buying_power:,.2f} | Hedge Reserve: {hedge_reserve:,.2f}")
     insufficient_funds = buying_power < hedge_reserve
 
     if insufficient_funds:
@@ -522,3 +522,4 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
