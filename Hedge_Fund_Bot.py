@@ -176,12 +176,31 @@ def place_order(symbol, qty, side, current_price, order_type_label="manual"):
             api.submit_order(symbol, qty, side, 'market', 'gtc', client_order_id=unique_id)
             print(f"✅ MARKET ORDER ({order_type_label}): {side} {symbol} ({qty})")
         else:
-            limit_price = round(current_price * 1.01, 2) if side == 'buy' else round(current_price * 0.99, 2)
-            api.submit_order(symbol, qty, side, 'limit', limit_price=limit_price,
-                             time_in_force='day', extended_hours=True, client_order_id=unique_id)
-            print(f"🌙 EXTENDED ORDER ({order_type_label}): {side} {symbol} @ {limit_price}")
+            quote = api.get_latest_quote(symbol)
+            if side == 'buy':
+                current_price = quote.ask_price
+                if current_price == 0: current_price = quote.bid_price
+                limit_price = round(current_price * 1.01,2)
+            else:
+                current_price = quote.bid_price
+                if current_price == 0: current_price = quote.ask_price
+                limit_price = round(current_price * 0.99,2)
+            if current_price == 0:
+                print(f"⚠️ DATA ERROR: Could not fetch valid quote for {symbol}. Skipping.")
+                return
+            api.submit_order(
+                symbol = symbol,
+                qty = qty,
+                side = side,
+                type = 'limit',
+                time_in_force = 'day',
+                limit_price =limit_price,
+                extended_hours = True,
+                client_order_id = unique_id
+            )
+            print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} (Ref: {current_price})")
     except Exception as e:
-        print(f"❌ Order Failed: {e}")
+        print(f"❌ Error closing {symbol}: {e}")
 
 
 def get_cooldown_list():
