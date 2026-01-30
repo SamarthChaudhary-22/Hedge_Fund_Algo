@@ -64,6 +64,7 @@ def calculate_greeks(S, K, T, r, sigma, type='put'):
 # --- 📊 MARKET INTERNALS ---
 def get_market_internals():
     try:
+        # 1. Historical Data (IEX is fine)
         start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
         daily = api.get_bars('SPY', tradeapi.rest.TimeFrame.Day, start=start_date, feed='iex').df
         daily = daily.tail(30)
@@ -73,25 +74,28 @@ def get_market_internals():
         rv_20d = daily['returns'].tail(20).std() * math.sqrt(252)
         prev_close = daily.iloc[-1]['close']
 
+        # 2. Intraday Data (IEX)
+        # Since we wait for 9:35 AM, IEX will have data for SPY.
         today_str = datetime.now().strftime('%Y-%m-%d')
         intraday = api.get_bars('SPY', tradeapi.rest.TimeFrame(15, tradeapi.rest.TimeFrameUnit.Minute), start=today_str, limit=50, feed='iex').df
-        if intraday.empty:
-            start_yesterday = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
-            intraday = api.get_bars('SPY', tradeapi.rest.TimeFrame(15, tradeapi.rest.TimeFrameUnit.Minute), start=start_yesterday, limit=50, feed='iex').df
 
         if intraday.empty:
-            return None, 0, 0, 0, 0
+            # Fallback for very early morning testing before 9:30
+            current_price = prev_close
+            atr_pct = 0.01
+            gap_pct = 0
+        else:
+            current_price = intraday.iloc[-1]['close']
+            high_low = (intraday['high'] - intraday['low']).mean()
+            atr_pct = high_low / current_price
+            gap_pct = abs(current_price - prev_close) / prev_close
 
-        current_price = intraday.iloc[-1]['close']
-        high_low = (intraday['high'] - intraday['low']).mean()
-        atr_pct = high_low / current_price
-        gap_pct = abs(current_price - prev_close) / prev_close
-
-        # 🚨 FIX 1: REAL IMPLIED VOLATILITY (No more ATR guessing)
-        # We fetch a quick snapshot of ATM puts to get the market's true IV
+        # 3. IV Check (MUST KEEP YAHOO HERE)
+        # IEX gives us the Price, but we still need Yahoo/Alpaca to guess the Volatility
         iv_est = get_real_iv_snapshot(current_price)
 
         return current_price, atr_pct, gap_pct, rv_20d, iv_est
+
     except Exception as e:
         print(f"Data Error: {e}")
         return None, 0, 0, 0, 0
