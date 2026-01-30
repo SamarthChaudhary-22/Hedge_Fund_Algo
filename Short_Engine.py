@@ -22,6 +22,7 @@ POSITION_SIZE_PANIC = 0.05  # 5% Defensive
 PANIC_EXPOSURE_CAP = 0.30  # Max 30% account short
 HARD_STOP_PCT = 0.10  # 10% Hard Stop
 DAILY_TARGET_PCT = 0.015  # 1.5% Daily Goal (Matches Long Bot)
+HEDGE_RESERVE_PCT = 0.02
 
 # OPTIMIZED STRATEGY (Rank #1: Momentum Breakdown)
 ENTRY_Z_SHORT = -1.75  # Short if Z > -1.75 (and Price < SMA50)
@@ -315,6 +316,13 @@ def run_short_engine():
     check_and_refresh_stale_orders()  #--cleans up old limit orders
     account = api.get_account()
     equity = float(account.equity)
+    buying_power = float(account.buying_power)
+    hedge_reserve = equity * HEDGE_RESERVE_PCT
+    print(f"Equity: ${equity: ,.2f} | BP: ${buying_power: ,.2f} | Hedge Reserve: ${hedge_reserve: ,.2f}")
+    insufficient_funds = buying_power < hedge_reserve
+
+    if insufficient_funds:
+        print(f"⛔ Reserving BP For Hedge: BP: ${buying_power: ,.2f} | Hedge Reserve: ${hedge_reserve: ,.2f}")
 
     # --- 🆕 HARVEST CHECK (Daily Goal) ---
     last_equity = float(account.last_equity)
@@ -391,6 +399,9 @@ def run_short_engine():
             return
 
     # 3. SCANNING
+    if insufficient_funds:
+        print(f"👮🏻 Stopping Scan, Preserving BP For Hedging: BP:${buying_power: ,.2f} | Hedge Reserve: ${hedge_reserve: ,.2f}")
+        return
 
     # 🛑 BLOCK NEW SHORTS IN HARVEST MODE
     if harvest_mode:
@@ -407,6 +418,7 @@ def run_short_engine():
 
     for symbol in universe:
         time.sleep(0.5)
+
 
         # Harvest Check Loop
         if harvest_mode: break
@@ -477,4 +489,3 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
-
