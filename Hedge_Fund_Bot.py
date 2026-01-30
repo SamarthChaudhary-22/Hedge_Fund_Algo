@@ -181,7 +181,12 @@ def place_order(symbol, qty, side, current_price, order_type_label="manual"):
             quote = api.get_latest_quote(symbol)
 
             try:
-                yf_price = yf_ticker.fast_info['last_price']
+                df = yf_ticker.history(period='1d', interval='1m', prepost=True)
+
+                if not df.empty:
+                    yf_price = float(df.iloc[-1]['Close'])
+                else:
+                    yf_price = yf_ticker.fast_info['last_info']
             except:
                 yf_price = 0
 
