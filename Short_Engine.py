@@ -232,23 +232,32 @@ def close_position(symbol, reason):
             api.close_position(symbol)
             print(f"💰 MARKET CLOSE: {symbol} | {reason}")
         else:
-            trade = api.get_latest_trade(symbol)
-            current_price = trade.price
-            limit_price = round(current_price * 1.01, 2) if side == 'buy' else round(current_price * 0.99, 2)
+            quote = api.get_latest_quote(symbol)
+
+            if side == 'buy':
+                current_price = quote.ask_price
+                if current_price == 0: current_price = quote.bid_price
+                limit_price = round(current_price * 1.01, 2)
+            else:
+                current_price = quote.bid_price
+                if current_price == 0: current_price = quote.ask_price
+                limit_price = round(current_price * 0.99, 2)
+            if current_price == 0:
+                print(f"⚠️ DATA ERROR: Could not fetch valid quote for {symbol}. Skipping.")
+                return
 
             api.submit_order(
-                symbol=symbol,
-                qty=qty,
-                side=side,
-                type='limit',
-                time_in_force='day',
-                limit_price=limit_price,
-                extended_hours=True
+                symbol = symbol,
+                qty = qty,
+                side = side,
+                type = 'limit',
+                time_in_force = 'day',
+                limit_price = limit_price,
+                extended_hours = True
             )
-            print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} | {reason}")
-
+            print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} (Ref: {current_price}) | {reason}")
     except Exception as e:
-        print(f"❌ Failed to Close {symbol}: {e}")
+        print(f"❌ Error closing {symbol}: {e}")
 
 
 def place_short_order(symbol, qty, reason, stop_pct):
