@@ -232,30 +232,44 @@ def close_position(symbol, reason):
             api.close_position(symbol)
             print(f"💰 MARKET CLOSE: {symbol} | {reason}")
         else:
+            yf_ticker = yf.Ticker(symbol)
             quote = api.get_latest_quote(symbol)
 
+            try:
+                yf_price = yf_ticker.fast_info['last_price']
+            except:
+                yf_price = 0
             if side == 'buy':
-                current_price = quote.ask_price
-                if current_price == 0: current_price = quote.bid_price
-                limit_price = round(current_price * 1.01, 2)
+                current_price = yf_price
+                if current_price is None or current_price ==0:
+                    print(f"⚠️ Yahoo Failed/Zero for {symbol}. Using IEX Ask.")
+                    current_price = quote.ask_price
+                if current_price == 0:
+                    current_price = quote.bid_price
+                limit_price = round(current_price * 1.01,2)
             else:
-                current_price = quote.bid_price
-                if current_price == 0: current_price = quote.ask_price
-                limit_price = round(current_price * 0.99, 2)
-            if current_price == 0:
-                print(f"⚠️ DATA ERROR: Could not fetch valid quote for {symbol}. Skipping.")
+                current_price = yf_price
+                if current_price is None or current_price == 0:
+                    print(f"⚠️ Yahoo Failed/Zero for {symbol}. Using IEX Bid.")
+                    current_price = quote.bid_price
+                if current_price == 0:
+                    current_price = quote.ask_price
+                limit_price = round(current_price * 0.99,2)
+
+            if current_price == 0 or current_price is None:
+                print(f"⚠️ DATA ERROR: Could not fetch valid quote for {symbol} from ANY source. Skipping.")
                 return
 
             api.submit_order(
-                symbol = symbol,
-                qty = qty,
-                side = side,
-                type = 'limit',
-                time_in_force = 'day',
-                limit_price = limit_price,
-                extended_hours = True
+                symbol=symbol,
+                qty=qty,
+                side=side,
+                type='limit',
+                time_in_force='day',
+                limit_price=limit_price,
+                extended_hours=True
             )
-            print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} (Ref: {current_price}) | {reason}")
+            print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} (Ref: {current_price})")
     except Exception as e:
         print(f"❌ Error closing {symbol}: {e}")
 
