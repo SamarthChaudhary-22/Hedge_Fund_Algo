@@ -319,6 +319,7 @@ def execute_omni_hedge():
     if ny_time.hour == 9 and ny_time.minute < 35:
         print("⏳ Market Opening... Waiting for spreads to normalize (9:35 AM).")
         return  # Skip this loop, wait for next heartbeat
+    check_vega_exit()
     account = api.get_account()
     equity = float(account.portfolio_value)
 
@@ -441,3 +442,4 @@ def close_all_hedges():
 
 if __name__ == "__main__":
     execute_omni_hedge()
+
