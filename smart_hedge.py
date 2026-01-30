@@ -1,5 +1,3 @@
-from sys import exception
-
 import alpaca_trade_api as tradeapi
 import pandas as pd
 import numpy as np
@@ -389,3 +387,4 @@ def close_all_hedges():
 
 if __name__ == "__main__":
     execute_omni_hedge()
+
