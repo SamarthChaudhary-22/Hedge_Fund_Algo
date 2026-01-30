@@ -236,7 +236,13 @@ def close_position(symbol, reason):
             quote = api.get_latest_quote(symbol)
 
             try:
-                yf_price = yf_ticker.fast_info['last_price']
+                df = yf_ticker.history(period='1d', interval='1m', prepost=True)
+
+                if not df.empty:
+                    yf_price = float(df.iloc[-1]['Close'])
+                else:
+                    yf_price = yf_ticker.fast_info['last_price']
+
             except:
                 yf_price = 0
             if side == 'buy':
