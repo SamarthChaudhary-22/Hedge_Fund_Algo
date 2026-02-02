@@ -2,6 +2,7 @@ import os
 import requests
 import asyncio
 import logging
+import sys
 from alpaca_trade_api.stream import Stream
 
 # --- CONFIGURATION ---
@@ -115,29 +116,27 @@ async def trade_update_handler(data):
 
 
 async def auto_disconnect():
-    # Wait 5 hours 55 minutes to restart cleanly before GitHub kills it
+    logger.info("Auto Disconnect")
     await asyncio.sleep(20700)
-    logger.warning("⏰ Time limit reached. Disconnecting...")
+    logger.warning("⏰ Time limit reached. Performing Hard Exit...")
     os._exit(0)
 
-
-def run_listener():
-    logger.info("--- 🎧 DISCORD LISTENER ACTIVE (With De-Duplication & Logging) ---")
-
-    stream = Stream(API_KEY, SECRET_KEY, base_url=BASE_URL, data_feed='iex')
-    stream.subscribe_trade_updates(trade_update_handler)
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(auto_disconnect())
-
-    try:
-        loop.run_until_complete(stream.run())
-    except Exception as e:
-        logger.error(f"Stream Error: {e}")
-        time.sleep(5)
-        run_listener()
+async def main():
+    logger.info("--- 🎧 DISCORD LISTENER ACTIVE")
+    asyncio.create_task(auto_disconnect())
+    while True:
+        try:
+            stream = Stream(API_KEY, SECRET_KEY, base_url=BASE_URL, data_feed='iex')
+            stream.subscribe_trade_updates(trade_update_handler)
+            await stream.run()
+        except Exception as e:
+            logger.error(f"Stream Error: {e}")
+            logger.info("Reconnecting...")
+            await asyncio.sleep(5)
 
 
 if __name__ == "__main__":
-    import time
-    run_listener()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Manual Stop Initiated....")
