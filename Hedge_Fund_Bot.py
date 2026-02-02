@@ -223,8 +223,11 @@ def place_order(symbol, qty, side, current_price, order_type_label="manual"):
                 client_order_id=unique_id
             )
             print(f"🌙 EXTENDED ORDER: {symbol} | {qty} @ {limit_price} (Ref: {current_price})")
-
     except Exception as e:
+        error_msg = str(e).lower()
+        if "insufficient buying power" in error_msg or "buying power" in error_msg:
+            print(f"❌ SKIP {symbol}: Insufficient Buying Power.")
+            return False
         print(f"❌ Error {side}ing {symbol}: {e}")
         return False
 
@@ -523,4 +526,3 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
-
