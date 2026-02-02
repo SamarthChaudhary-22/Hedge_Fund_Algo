@@ -186,14 +186,14 @@ def place_order(symbol, qty, side, current_price, order_type_label="manual"):
                 if not df.empty:
                     yf_price = float(df.iloc[-1]['Close'])
                 else:
-                    yf_price = yf_ticker.fast_info['last_info']
+                    yf_price = yf_ticker.fast_info['last_price']
             except:
                 yf_price = 0
 
             if side == 'buy':
                 current_price = yf_price
                 if current_price is None or current_price == 0:
-                    print(f"⚠️ Yahoo Failed/Zero for {symbol}. Using IEX Ask.")
+                    print(f"⚠️ Yahoo Failed/Zero for {symbol}. Using IEX.")
                     current_price = quote.ask_price
                 if current_price == 0:
                     current_price = quote.bid_price
@@ -202,7 +202,7 @@ def place_order(symbol, qty, side, current_price, order_type_label="manual"):
             else:
                 current_price = yf_price
                 if current_price is None or current_price == 0:
-                    print(f"⚠️ Yahoo Failed/Zero for {symbol}. Using IEX Ask.")
+                    print(f"⚠️ Yahoo Failed/Zero for {symbol}. Using IEX.")
                     current_price = quote.bid_price
                 if current_price == 0:
                     current_price = quote.ask_price
@@ -222,10 +222,10 @@ def place_order(symbol, qty, side, current_price, order_type_label="manual"):
                 extended_hours=True,
                 client_order_id=unique_id
             )
-            print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} (Ref: {current_price})")
+            print(f"🌙 EXTENDED ORDER: {symbol} | {qty} @ {limit_price} (Ref: {current_price})")
 
     except Exception as e:
-        print(f"❌ Error closing {symbol}: {e}")
+        print(f"❌ Error {side}ing {symbol}: {e}")
 
 
 def get_cooldown_list():
@@ -308,7 +308,7 @@ def run_hedge_fund():
     cash = float(account.cash)
     buying_power = float(account.buying_power)
     hedge_reserve = equity * HEDGE_RESERVE_PCT
-    print(f"Equity: ${equity} | BP: {buying_power:,.2f} | Hedge Reserve: {hedge_reserve:,.2f}")
+    print(f"Equity: ${equity} | BP: {buying_power: ,.2f} | Hedge Reserve: {hedge_reserve:,.2f}")
     insufficient_funds = buying_power < hedge_reserve
 
     if insufficient_funds:
@@ -522,4 +522,3 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
-
