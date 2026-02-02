@@ -278,6 +278,7 @@ def close_position(symbol, reason):
             print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} (Ref: {current_price})")
     except Exception as e:
         print(f"❌ Error closing {symbol}: {e}")
+        return False
 
 
 def place_short_order(symbol, qty, reason, stop_pct):
@@ -518,3 +519,4 @@ if __name__ == "__main__":
         time.sleep(60)
 
     print("--- 🔴 SESSION ENDING ---")
+
