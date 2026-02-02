@@ -226,6 +226,7 @@ def place_order(symbol, qty, side, current_price, order_type_label="manual"):
 
     except Exception as e:
         print(f"❌ Error {side}ing {symbol}: {e}")
+        return False
 
 
 def get_cooldown_list():
@@ -522,3 +523,4 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
