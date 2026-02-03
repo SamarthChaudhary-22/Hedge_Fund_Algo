@@ -2,10 +2,11 @@ import os
 import requests
 import asyncio
 import logging
-import sys
-#
+import nest_asyncio
 from alpaca_trade_api.stream import Stream
-from functools import partial  # <--- New Import needed for the fix
+from functools import partial
+
+nest_asyncio.apply()
 
 # --- CONFIGURATION ---
 API_KEY = os.getenv('APCA_API_KEY_ID')
@@ -24,10 +25,6 @@ processed_events = set()
 
 
 def send_discord_alert_sync(message, color=None):
-    """
-    The actual synchronous sending logic (Blocking).
-    We moved the logic here so we can wrap it later.
-    """
     if color == 'green':
         color_code = 5763719
     elif color == 'red':
@@ -50,17 +47,14 @@ def send_discord_alert_sync(message, color=None):
 
 
 async def send_discord_alert_async(message, color=None):
-    """
-    The Async Wrapper (Non-Blocking).
-    This offloads the heavy 'requests' call to a separate thread
-    so the Alpaca WebSocket heartbeat never gets blocked.
-    """
-    loop = asyncio.get_running_loop()
-    # run_in_executor runs the sync function in a thread
-    await loop.run_in_executor(
-        None,
-        partial(send_discord_alert_sync, message, color)
-    )
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            partial(send_discord_alert_sync, message, color)
+        )
+    except Exception as e:
+        logger.error(f"Async Alert Error: {e}")
 
 
 async def trade_update_handler(data):
@@ -68,13 +62,10 @@ async def trade_update_handler(data):
         event = data.event
         order = data.order
 
-        # 1. GENERATE A UNIQUE ID FOR THIS EVENT
         event_signature = f"{order['id']}_{event}_{order['filled_qty']}"
 
-        # 2. CHECK IF WE SAW THIS ALREADY
         if event_signature in processed_events:
             return
-        # 3. ADD TO MEMORY
         processed_events.add(event_signature)
 
         if len(processed_events) > 1000:
@@ -130,12 +121,9 @@ async def trade_update_handler(data):
             )
 
             logger.info(f"Sending Alert: {action}")
-
-            # 🚨 USE THE ASYNC WRAPPER HERE
             await send_discord_alert_async(msg, color)
 
     except Exception as e:
-        # Catch errors so the stream doesn't crash silently
         logger.error(f"Handler Error: {e}")
 
 
@@ -149,14 +137,19 @@ async def auto_disconnect():
 async def main():
     logger.info("--- 🎧 DISCORD LISTENER ACTIVE (Non-Blocking Mode)")
     asyncio.create_task(auto_disconnect())
+
     while True:
         try:
-            # Explicitly set base_url to avoid library defaults issues
             stream = Stream(API_KEY, SECRET_KEY, base_url=BASE_URL, data_feed='iex')
             stream.subscribe_trade_updates(trade_update_handler)
+
             logger.info("Sending Online Status to Discord...")
-            await send_discord_alert_async("🎧 Discord Listener Connected...", "green")
+            await send_discord_alert_async(
+                "🎧 **Discord Listener Connected & Online**\nWaiting for fills...",
+                "green"
+            )
             await stream.run()
+
         except Exception as e:
             logger.error(f"Stream Error: {e}")
             logger.info("Reconnecting...")
