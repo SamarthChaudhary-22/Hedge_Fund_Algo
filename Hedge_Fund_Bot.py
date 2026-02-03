@@ -511,6 +511,9 @@ def run_hedge_fund():
             if shares > 0:
                 print(f"\n🚀 {signal.upper()}: {symbol} | {reason}")
                 place_order(symbol, shares, signal, price, 'entry')
+                success = place_order(symbol, shares, "buy", price)
+                if success is False:
+                    continue
                 cash -= (shares * price)
                 held_symbols.add(symbol)
                 long_count += 1
@@ -527,5 +530,6 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
