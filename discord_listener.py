@@ -3,7 +3,9 @@ import requests
 import asyncio
 import logging
 import sys
+#
 from alpaca_trade_api.stream import Stream
+from functools import partial  # <--- New Import needed for the fix
 
 # --- CONFIGURATION ---
 API_KEY = os.getenv('APCA_API_KEY_ID')
@@ -21,7 +23,11 @@ logger = logging.getLogger(__name__)
 processed_events = set()
 
 
-def send_discord_alert(message, color=None):
+def send_discord_alert_sync(message, color=None):
+    """
+    The actual synchronous sending logic (Blocking).
+    We moved the logic here so we can wrap it later.
+    """
     if color == 'green':
         color_code = 5763719
     elif color == 'red':
@@ -32,12 +38,10 @@ def send_discord_alert(message, color=None):
         color_code = 3447003
 
     data = {
-        "embeds": [
-            {
-                "description": message,
-                "color": color_code
-            }
-        ]
+        "embeds": [{
+            "description": message,
+            "color": color_code
+        }]
     }
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=data)
@@ -45,89 +49,113 @@ def send_discord_alert(message, color=None):
         logger.error(f"Failed to send Discord alert: {e}")
 
 
+async def send_discord_alert_async(message, color=None):
+    """
+    The Async Wrapper (Non-Blocking).
+    This offloads the heavy 'requests' call to a separate thread
+    so the Alpaca WebSocket heartbeat never gets blocked.
+    """
+    loop = asyncio.get_running_loop()
+    # run_in_executor runs the sync function in a thread
+    await loop.run_in_executor(
+        None,
+        partial(send_discord_alert_sync, message, color)
+    )
+
+
 async def trade_update_handler(data):
-    event = data.event
-    order = data.order
+    try:
+        event = data.event
+        order = data.order
 
-    # 1. GENERATE A UNIQUE ID FOR THIS EVENT
-    event_signature = f"{order['id']}_{event}_{order['filled_qty']}"
+        # 1. GENERATE A UNIQUE ID FOR THIS EVENT
+        event_signature = f"{order['id']}_{event}_{order['filled_qty']}"
 
-    # 2. CHECK IF WE SAW THIS ALREADY
-    if event_signature in processed_events:
-        return
-    # 3. ADD TO MEMORY
-    processed_events.add(event_signature)
+        # 2. CHECK IF WE SAW THIS ALREADY
+        if event_signature in processed_events:
+            return
+        # 3. ADD TO MEMORY
+        processed_events.add(event_signature)
 
-    if len(processed_events) > 1000:
-        processed_events.clear()
+        if len(processed_events) > 1000:
+            processed_events.clear()
 
-    symbol = order['symbol']
-    side = order['side'].upper()
-    filled_qty = order['filled_qty']
-    price = order['filled_avg_price']
-    order_type = order['type']
+        symbol = order['symbol']
+        side = order['side'].upper()
+        filled_qty = order['filled_qty']
+        price = order['filled_avg_price']
+        order_type = order['type']
 
-    is_option = len(symbol) > 6
+        is_option = len(symbol) > 6
 
-    if event == 'fill':
+        if event == 'fill':
+            total_value = float(filled_qty) * float(price) if price else 0
+            client_id = order.get('client_order_id', '')
 
-        total_value = float(filled_qty) * float(price) if price else 0
-        client_id = order.get('client_order_id', '')
+            icon = "🔔";
+            color = "blue";
+            action = f"{side} {symbol}"
+            if is_option:
+                icon = "🧱";
+                color = "magenta";
+                action = f"OPTION: {symbol}"
 
-        icon = "🔔"
-        color = "blue"
-        action = f"{side} {symbol}"
-        if is_option:
-            icon = "🧱"
-            color = "magenta"
-            action = f"OPTION: {symbol}"
+            if "harvest" in client_id:
+                icon = "🌾";
+                color = "green";
+                action = f"HARVEST WIN: {symbol}"
+            elif "take_profit" in client_id:
+                icon = "💰";
+                color = "green";
+                action = f"TAKE PROFIT: {symbol}"
+            elif "trailing_stop" in client_id:
+                icon = "🛡️";
+                color = "gold";
+                action = f"RATCHET STOP: {symbol}"
+            elif "stop" in client_id:
+                icon = "🛑";
+                color = "red";
+                action = f"STOP LOSS: {symbol}"
+            elif "entry" in client_id:
+                icon = "🚀";
+                color = "blue";
+                action = f"ENTRY: {symbol}"
 
-        if "harvest" in client_id:
-            icon = "🌾"
-            color = "green"
-            action = f"HARVEST WIN: {symbol}"
-        elif "take_profit" in client_id:
-            icon = "💰"
-            color = "green"
-            action = f"TAKE PROFIT: {symbol}"
-        elif "trailing_stop" in client_id:
-            icon = "🛡️"
-            color = "gold"
-            action = f"RATCHET STOP: {symbol}"
-        elif "stop" in client_id:
-            icon = "🛑"
-            color = "red"
-            action = f"STOP LOSS: {symbol}"
-        elif "entry" in client_id:
-            icon = "🚀"
-            color = "blue"
-            action = f"ENTRY: {symbol}"
+            msg = (
+                f"**{icon} ORDER FILLED**\n"
+                f"**Action:** {action}\n"
+                f"**Qty:** {filled_qty} @ ${float(price):.2f}\n"
+                f"**Value:** ${total_value:,.2f}\n"
+                f"**Type:** {order_type.upper()}"
+            )
 
-        msg = (
-            f"**{icon} ORDER FILLED**\n"
-            f"**Action:** {action}\n"
-            f"**Qty:** {filled_qty} @ ${float(price):.2f}\n"
-            f"**Value:** ${total_value:,.2f}\n"
-            f"**Type:** {order_type.upper()}"
-        )
+            logger.info(f"Sending Alert: {action}")
 
-        logger.info(f"Sending Alert: {action}")
-        send_discord_alert(msg, color)
+            # 🚨 USE THE ASYNC WRAPPER HERE
+            await send_discord_alert_async(msg, color)
+
+    except Exception as e:
+        # Catch errors so the stream doesn't crash silently
+        logger.error(f"Handler Error: {e}")
 
 
 async def auto_disconnect():
-    logger.info("Auto Disconnect")
+    logger.info("Auto Disconnect Timer Started (5h 45m)")
     await asyncio.sleep(20700)
     logger.warning("⏰ Time limit reached. Performing Hard Exit...")
     os._exit(0)
 
+
 async def main():
-    logger.info("--- 🎧 DISCORD LISTENER ACTIVE")
+    logger.info("--- 🎧 DISCORD LISTENER ACTIVE (Non-Blocking Mode)")
     asyncio.create_task(auto_disconnect())
     while True:
         try:
+            # Explicitly set base_url to avoid library defaults issues
             stream = Stream(API_KEY, SECRET_KEY, base_url=BASE_URL, data_feed='iex')
             stream.subscribe_trade_updates(trade_update_handler)
+            logger.info("Sending Online Status to Discord...")
+            await send_discord_alert_async("🎧 Discord Listener Connected...", "green")
             await stream.run()
         except Exception as e:
             logger.error(f"Stream Error: {e}")
