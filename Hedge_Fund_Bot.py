@@ -479,7 +479,7 @@ def run_hedge_fund():
             break
 
         if i % 10 == 0: print(f"Scanned {i}/{len(all_tickers)}...", end='\r')
-        time.sleep(0.2)
+        time.sleep(0.5)
 
         price, z, sma_50, cmf_slope = get_technical_data(symbol)
         if price is None: continue
@@ -527,9 +527,10 @@ if __name__ == "__main__":
             run_hedge_fund()
         except Exception as e:
             print(f"CRITICAL ERROR: {e}")
-        print("Waiting 5 seconds...")
-        time.sleep(5)
+        print("Waiting 30 seconds...")
+        time.sleep(30)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
 
