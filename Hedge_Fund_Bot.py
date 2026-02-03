@@ -225,12 +225,12 @@ def place_order(symbol, qty, side, current_price, order_type_label="manual"):
             print(f"🌙 EXTENDED ORDER: {symbol} | {qty} @ {limit_price} (Ref: {current_price})")
     except Exception as e:
         error_msg = str(e).lower()
-        if "insufficient buying power" in error_msg or "buying power" in error_msg:
-            print(f"⚠️ SKIP {symbol}: Insufficient Buying Power.")
+        if "insufficient buying power" in error_msg  or "buying power" in error_msg:
+            print(f"⚠️ SKIP {symbol}: {error_msg}")
             return False
         else:
-            print(f"❌ CRITICAL ERROR {side}ing {symbol}: {e}")
-            raise e 
+            print(f"❌❌ ERROR {side}ing {symbol}: {error_msg}")
+            return False
 
 
 def get_cooldown_list():
@@ -527,4 +527,5 @@ if __name__ == "__main__":
         print("Waiting 60 seconds...")
         time.sleep(60)
     print("--- 🔴 SESSION ENDING ---")
+
 
