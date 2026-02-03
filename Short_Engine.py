@@ -277,8 +277,13 @@ def close_position(symbol, reason):
             )
             print(f"🌙 EXTENDED CLOSE: {symbol} | {qty} @ {limit_price} (Ref: {current_price})")
     except Exception as e:
-        print(f"❌ Error closing {symbol}: {e}")
-        return False
+        error_msg = str(e).lower()
+        if "insufficient buying power" in error_msg or "buying power" in error_msg:
+            print(f"⚠️ SKIP buying {symbol}: {error_msg}")
+            return False
+        else:
+            print(f"❌❌ ERROR: {error_msg}")
+            return False
 
 
 def place_short_order(symbol, qty, reason, stop_pct):
@@ -414,6 +419,9 @@ def run_short_engine():
             if z is not None:
                 if z < EXIT_Z_SHORT and pct_profit > 0.01:
                     close_position(symbol, f"Panic Cover (Z:{z:.2f} < {EXIT_Z_SHORT})")
+                    success = close_position(symbol, qty)
+                    if success is False:
+                        continue
                     short_count -= 1
 
     # 2. PANIC & CAP CHECK
@@ -515,8 +523,9 @@ if __name__ == "__main__":
             run_short_engine()
         except Exception as e:
             print(f"CRITICAL ERROR in loop: {e}")
-        print("Waiting 60 seconds...")
-        time.sleep(60)
+        print("Waiting 5 seconds...")
+        time.sleep(5)
 
     print("--- 🔴 SESSION ENDING ---")
+
 
