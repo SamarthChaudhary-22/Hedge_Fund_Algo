@@ -527,9 +527,10 @@ if __name__ == "__main__":
             run_hedge_fund()
         except Exception as e:
             print(f"CRITICAL ERROR: {e}")
-        print("Waiting 60 seconds...")
-        time.sleep(60)
+        print("Waiting 5 seconds...")
+        time.sleep(5)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
 
