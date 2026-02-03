@@ -455,7 +455,7 @@ def run_short_engine():
     print(f"Scanning {len(universe)} stocks...")
 
     for symbol in universe:
-        time.sleep(0.2)
+        time.sleep(0.5)
 
 
         # Harvest Check Loop
@@ -523,10 +523,11 @@ if __name__ == "__main__":
             run_short_engine()
         except Exception as e:
             print(f"CRITICAL ERROR in loop: {e}")
-        print("Waiting 5 seconds...")
-        time.sleep(5)
+        print("Waiting 30 seconds...")
+        time.sleep(30)
 
     print("--- 🔴 SESSION ENDING ---")
+
 
 
 
