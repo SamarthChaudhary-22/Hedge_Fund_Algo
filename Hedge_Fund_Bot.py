@@ -479,7 +479,7 @@ def run_hedge_fund():
             break
 
         if i % 10 == 0: print(f"Scanned {i}/{len(all_tickers)}...", end='\r')
-        time.sleep(0.5)
+        time.sleep(0.2)
 
         price, z, sma_50, cmf_slope = get_technical_data(symbol)
         if price is None: continue
@@ -530,6 +530,7 @@ if __name__ == "__main__":
         print("Waiting 5 seconds...")
         time.sleep(5)
     print("--- 🔴 SESSION ENDING ---")
+
 
 
 
