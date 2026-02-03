@@ -455,7 +455,7 @@ def run_short_engine():
     print(f"Scanning {len(universe)} stocks...")
 
     for symbol in universe:
-        time.sleep(0.5)
+        time.sleep(0.2)
 
 
         # Harvest Check Loop
@@ -527,5 +527,6 @@ if __name__ == "__main__":
         time.sleep(5)
 
     print("--- 🔴 SESSION ENDING ---")
+
 
 
