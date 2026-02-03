@@ -25,6 +25,10 @@ processed_events = set()
 
 
 def send_discord_alert_sync(message, color=None):
+    if not DISCORD_WEBHOOK_URL:
+        logger.error("Discord Webhook URL not found")
+        return
+
     if color == 'green':
         color_code = 5763719
     elif color == 'red':
@@ -41,7 +45,12 @@ def send_discord_alert_sync(message, color=None):
         }]
     }
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json=data)
+        response = requests.post(DISCORD_WEBHOOK_URL, json=data)
+        if response.status_code not in [200,204]:
+            print(f"❌ Discord Response Code: {response.status_code}")
+        else:
+            print("✅ Message sent successfully")
+            pass
     except Exception as e:
         logger.error(f"Failed to send Discord alert: {e}")
 
