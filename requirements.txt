@@ -8,3 +8,4 @@ scipy
 lxml
 yfinance
 pytz
+nest_asycio
