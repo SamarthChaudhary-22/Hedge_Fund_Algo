@@ -14,31 +14,31 @@ API_KEY = os.getenv('APCA_API_KEY_ID')
 SECRET_KEY = os.getenv('APCA_API_SECRET_KEY')
 BASE_URL = "https://paper-api.alpaca.markets"
 
-# ⚙️ FRAGILITY TRIGGERS
-GAP_THRESHOLD = 0.004  # > 0.4% Overnight Gap
-ATR_THRESHOLD = 0.012  # > 1.2% Daily Range
+# ⚙️ FRAGILITY TRIGGERS (FIXED - More Realistic)
+GAP_THRESHOLD = 0.002
+ATR_THRESHOLD = 0.008
 
-# 📉 REGIME GATING
-MAX_VOL_SPREAD = 0.05  # IV-RV Spread Cap
-SPREAD_LIMIT = 0.10  # Max Bid-Ask Spread allowed (Liquidity Guard)
+#  REGIME GATING
+MAX_VOL_SPREAD = 0.05
+SPREAD_LIMIT = 0.10
 
-# 💰 BUDGET
+# BUDGET
 BASE_DAILY_COST = 0.001  # 0.1% Peace
 STRESS_DAILY_COST = 0.003  # 0.3% War
 
-# 📐 TARGET EXPOSURE
+# TARGET EXPOSURE
 LAYER_A_TARGET_RATIO = 0.40  # Neutralize 40% Delta
 LAYER_B_TARGET_VEGA = 0.002  # Target 0.2% Vega Exposure
 
-# 🧱 ALLOCATION
+# ALLOCATION
 LAYER_A_BUDGET_SPLIT = 0.70
 LAYER_B_BUDGET_SPLIT = 0.30
 
-# 📊 BETA PHYSICS
+# BETA PHYSICS
 BASE_BETA = 1.0
 MAX_STRESS_BETA = 1.6
 
-# 💾 STATE
+# STATE
 STATE_FILE = "hedge_state.json"
 
 api = tradeapi.REST(API_KEY, SECRET_KEY, BASE_URL, api_version='v2')
@@ -64,66 +64,63 @@ def calculate_greeks(S, K, T, r, sigma, type='put'):
 # --- 📊 MARKET INTERNALS ---
 def get_market_internals():
     try:
-        # 1. Historical Data (IEX is fine)
         start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
         daily = api.get_bars('SPY', tradeapi.rest.TimeFrame.Day, start=start_date, feed='iex').df
         daily = daily.tail(30)
-        if len(daily) < 20: return None, 0, 0, 0, 0
+        if len(daily) < 20:
+            print("❌ Insufficient historical data")
+            return None, 0, 0, 0, 0
 
         daily['returns'] = np.log(daily['close'] / daily['close'].shift(1))
         rv_20d = daily['returns'].tail(20).std() * math.sqrt(252)
         prev_close = daily.iloc[-1]['close']
 
-        # 2. Intraday Data (IEX)
-        # Since we wait for 9:35 AM, IEX will have data for SPY.
         today_str = datetime.now().strftime('%Y-%m-%d')
-        intraday = api.get_bars('SPY', tradeapi.rest.TimeFrame(15, tradeapi.rest.TimeFrameUnit.Minute), start=today_str, limit=50, feed='iex').df
+        intraday = api.get_bars('SPY', tradeapi.rest.TimeFrame(15, tradeapi.rest.TimeFrameUnit.Minute),
+                                start=today_str, limit=50, feed='iex').df
 
         if intraday.empty:
-            # Fallback for very early morning testing before 9:30
+            # Fallback for very early morning
             current_price = prev_close
             atr_pct = 0.01
             gap_pct = 0
+            print("⚠️ No intraday data yet, using previous close")
         else:
             current_price = intraday.iloc[-1]['close']
             high_low = (intraday['high'] - intraday['low']).mean()
             atr_pct = high_low / current_price
             gap_pct = abs(current_price - prev_close) / prev_close
 
-        # 3. IV Check (MUST KEEP YAHOO HERE)
-        # IEX gives us the Price, but we still need Yahoo/Alpaca to guess the Volatility
+        # 3. IV Check
         iv_est = get_real_iv_snapshot(current_price)
 
         return current_price, atr_pct, gap_pct, rv_20d, iv_est
 
     except Exception as e:
-        print(f"Data Error: {e}")
+        print(f"❌ Market Data Error: {e}")
         return None, 0, 0, 0, 0
 
 
 def fetch_option_contracts_manual(symbol, expiration_date=None):
     """
     Manually fetches option contracts using the raw REST endpoint
-    because 'alpaca-trade-api' is missing the helper function.
     """
     params = {
         'underlying_symbols': symbol,
         'status': 'active',
-        'limit': 1000  # Max limit to ensure we get them all
+        'limit': 1000
     }
     if expiration_date:
         params['expiration_date'] = expiration_date
 
     try:
-        # We use the raw .get() method which bypasses the missing SDK function
-        # Note: The endpoint is '/v2/options/contracts'
         response = api.get('/options/contracts', data=params)
-
-        # The raw response is a dict, we need to convert it to a friendly object
-        # or just work with the dict directly.
-        return response['option_contracts']
+        contracts = response.get('option_contracts', [])
+        if contracts:
+            print(f"✅ Found {len(contracts)} option contracts")
+        return contracts
     except Exception as e:
-        print(f"⚠️ Manual Contract Fetch Failed: {e}")
+        print(f"❌ Contract Fetch Failed: {e}")
         return []
 
 
@@ -136,87 +133,72 @@ def get_real_iv_snapshot(spy_price):
         today = date.today()
         exp = (today + timedelta(days=5)).strftime('%Y-%m-%d')
 
-        # 🚨 FIX: Use the manual fetcher instead of api.get_option_contracts
         contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp)
 
-        if not contracts_data: return 0.15
+        if not contracts_data:
+            print("⚠️ No contracts found, using default IV")
+            return 0.15
 
-        # Helper to safely get strike price from dict or object
+        # Helper to safely get strike price
         def get_strike(c):
             return float(c['strike_price']) if isinstance(c, dict) else float(c.strike_price)
 
         # Find ATM Contract
         atm_c = min(contracts_data, key=lambda x: abs(get_strike(x) - spy_price))
-
-        # Handle Symbol (Dict vs Object)
         symbol = atm_c['symbol'] if isinstance(atm_c, dict) else atm_c.symbol
+
         # 2. Try Alpaca IV
         try:
             snap = api.get_option_snapshot(symbol)
             if snap.implied_volatility and snap.implied_volatility > 0.01:
+                print(f"✅ Alpaca IV: {snap.implied_volatility:.1%}")
                 return snap.implied_volatility
         except:
             pass
 
-        # 3. Yahoo Fallback (Very Reliable for IV)
-        try:
-            yf_opt = yf.Ticker(symbol)
-            # Yahoo often hides IV in specific dicts, but calculating it roughly is safer
-            # if we have the price.
-            # Simpler: Yahoo actually calculates IV in the Option Chain view,
-            # but fetching the whole chain is slow.
-            # We will use a heuristic fallback if Alpaca fails:
-            return 0.18 # Default "Stress" IV if data is blind
-
-            # Note: Accurately calculating IV from just Price requires
-            # a Black-Scholes solver. For safety, if data fails,
-            # assume Vol is slightly elevated (18%).
-        except:
-            return 0.15
+        # 3. Default to reasonable estimate
+        print("⚠️ Using estimated IV (18%)")
+        return 0.18
 
     except Exception as e:
-        print(f"⚠️ IV Fetch Error: {e}")
+        print(f"⚠️ IV Fetch Error: {e}, using default")
         return 0.15
+
 
 def find_real_quote(symbol):
     """
-        Robust Quote Fetcher: Alpaca (Primary) -> Yahoo (Fallback)
-        """
+    Robust Quote Fetcher: Alpaca (Primary) -> Yahoo (Fallback)
+    """
     # 1. Try Alpaca First
-    alpaca_price = 0
     try:
         snap = api.get_option_snapshot(symbol)
         bid = snap.latest_quote.bid_price
         ask = snap.latest_quote.ask_price
 
-        # If Alpaca gives valid data, check liquidity
         if ask > 0 and bid > 0:
             mid = (bid + ask) / 2
             spread_pct = (ask - bid) / mid
-            if spread_pct < SPREAD_LIMIT:  # Only accept if spread is tight
+            if spread_pct < SPREAD_LIMIT:
+                print(f"✅ Alpaca quote: ${ask} (spread: {spread_pct:.1%})")
                 return ask
-
-        # If we are here, Alpaca data is either 0 or Spread is huge (Delayed Data)
-            print(f"⚠️ Alpaca Data Weak for {symbol} (Bid:{bid}/Ask:{ask}). Trying Yahoo.")
+            else:
+                print(f"⚠️ Alpaca spread too wide ({spread_pct:.1%}), trying Yahoo")
     except Exception as e:
-        print(f"⚠️ Alpaca Snapshot Failed: {e}")
-        pass
+        print(f"⚠️ Alpaca snapshot failed: {e}")
 
-    # 2. Yahoo Finance Fallback (The "Real" Price)
+    # 2. Yahoo Finance Fallback
     try:
-        # Yahoo uses the exact same OCC symbol format (e.g., SPY260130P00550000)
         yf_opt = yf.Ticker(symbol)
+        yf_price = yf_opt.fast_info.get('last_price')
 
-        # 'last_price' is usually reliable on Yahoo for active options
-        yf_price = yf_opt.fast_info['last_price']
-
-        if yf_price is not None and yf_price > 0:
-            print(f"✅ Yahoo Price Found: ${yf_price}")
+        if yf_price and yf_price > 0:
+            print(f"✅ Yahoo Price: ${yf_price}")
             return yf_price
     except Exception as e:
-        print(f"❌ Yahoo Price Failed for {symbol}: {e}")
+        print(f"❌ Yahoo failed for {symbol}: {e}")
 
-    return 0  # If both fail, skip contract
+    print(f"❌ No valid quote found for {symbol}")
+    return 0
 
 
 # --- CONTRACT SELECTION ---
@@ -225,22 +207,29 @@ def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_v
     exp_date = (today + timedelta(days=days_out)).strftime('%Y-%m-%d')
     T = days_out / 365.0
 
+    print(f"🔍 Scanning contracts for {exp_date} (Goal: {goal})")
+
     try:
         contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_date)
 
         if not contracts_data:
             # Try next day
+            print(f"⚠️ No contracts for {exp_date}, trying next day")
             exp_date = (today + timedelta(days=days_out + 1)).strftime('%Y-%m-%d')
             contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_date)
 
-        if not contracts_data: return None, 0, {}
+        if not contracts_data:
+            print(f"❌ No contracts available")
+            return None, 0, {}
 
         candidates = []
         for c in contracts_data:
-            # Handle Dict access for manual fetch
             strike = float(c['strike_price']) if isinstance(c, dict) else float(c.strike_price)
             symbol = c['symbol'] if isinstance(c, dict) else c.symbol
-            if not (0.75 * spy_price < strike < 1.05 * spy_price): continue
+
+            # Only consider strikes within reasonable range
+            if not (0.75 * spy_price < strike < 1.05 * spy_price):
+                continue
 
             greeks = calculate_greeks(spy_price, strike, T, 0.05, iv_est, 'put')
             abs_delta = abs(greeks['delta'])
@@ -249,24 +238,29 @@ def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_v
 
             # --- GOAL: LAYER A (Gamma/Delta) ---
             if goal == 'delta':
-                # 🚨 FIX 3: GAMMA AWARENESS
-                # We want Delta match, BUT we boost score for high Gamma (Fast reaction)
+                # Want Delta match + high Gamma
                 delta_match = -abs(abs_delta - target_val)
-                gamma_boost = greeks['gamma'] * 100  # Normalize
+                gamma_boost = greeks['gamma'] * 100
                 score = delta_match + (gamma_boost * 0.5)
 
-                # --- GOAL: LAYER B (Skew-Aware Convexity) ---
+            # --- GOAL: LAYER B (Skew-Aware Convexity) ---
             elif goal == 'vega':
-                if abs_delta < 0.05 or abs_delta > 0.40: continue
+                if abs_delta < 0.05 or abs_delta > 0.40:
+                    continue
                 skew_boost = 1.3 if 0.15 <= abs_delta <= 0.25 else 1.0
                 base_efficiency = greeks['vega'] / (abs_delta + 0.1)
                 score = base_efficiency * skew_boost
 
             candidates.append({'contract': c, 'greeks': greeks, 'score': score})
 
+        if not candidates:
+            print("❌ No suitable candidates found")
+            return None, 0, {}
+
         # Rank and Price Check
         candidates.sort(key=lambda x: x['score'], reverse=True)
         top_candidates = candidates[:5]
+        print(f"✅ Found {len(candidates)} candidates, checking top 5 for liquidity")
 
         best_c = None
         best_real_score = -999
@@ -274,16 +268,16 @@ def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_v
         best_greeks = {}
 
         for cand in top_candidates:
-            real_price = find_real_quote(cand['contract'].symbol)
-            if real_price <= 0: continue
+            symbol = cand['contract']['symbol'] if isinstance(cand['contract'], dict) else cand['contract'].symbol
+            real_price = find_real_quote(symbol)
+
+            if real_price <= 0:
+                continue
 
             # Greek-Per-Dollar Optimization
             if goal == 'delta':
-                # For Layer A, we prioritize the Gamma/Delta score we calculated
                 final_score = cand['score']
-
             elif goal == 'vega':
-                # For Layer B, pure Vega Bang-for-Buck
                 final_score = (cand['greeks']['vega'] / real_price) * (
                     1.3 if 0.15 <= abs(cand['greeks']['delta']) <= 0.25 else 1.0)
 
@@ -293,9 +287,17 @@ def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_v
                 best_price = real_price
                 best_greeks = cand['greeks']
 
+        if best_c:
+            symbol = best_c['symbol'] if isinstance(best_c, dict) else best_c.symbol
+            strike = best_c['strike_price'] if isinstance(best_c, dict) else best_c.strike_price
+            print(f"✅ Selected: {symbol} @ ${best_price} (Strike: {strike}, Score: {best_real_score:.2f})")
+        else:
+            print("❌ No contracts passed liquidity check")
+
         return best_c, best_price, best_greeks
 
-    except:
+    except Exception as e:
+        print(f"❌ Contract selection error: {e}")
         return None, 0, {}
 
 
@@ -306,25 +308,32 @@ def save_hedge_state(equity, hedge_cost):
         "entry_equity": equity,
         "hedge_cost": hedge_cost
     }
-    with open(STATE_FILE, 'w') as f: json.dump(state, f)
+    with open(STATE_FILE, 'w') as f:
+        json.dump(state, f)
+    print(f"💾 Saved hedge state: Cost ${hedge_cost:.2f}")
 
 
 def load_hedge_state():
-    if not os.path.exists(STATE_FILE): return None
-    with open(STATE_FILE, 'r') as f: return json.load(f)
+    if not os.path.exists(STATE_FILE):
+        return None
+    with open(STATE_FILE, 'r') as f:
+        return json.load(f)
 
 
 def generate_attribution_report(current_equity, hedge_pnl):
     state = load_hedge_state()
-    if not state: return
+    if not state:
+        print("⚠️ No hedge state found for attribution")
+        return
+
     entry_equity = state['entry_equity']
     hedge_cost = state.get('hedge_cost', 0)
 
     real_pnl = current_equity - entry_equity
     unhedged_pnl = real_pnl - hedge_pnl
 
-    # 🚨 FIX 5: KPI (Drawdown Efficiency)
-    drawdown_saved = max(0, hedge_pnl)  # Only count if positive
+    # Drawdown Efficiency
+    drawdown_saved = max(0, hedge_pnl)
     efficiency_ratio = 0
     if hedge_cost > 0:
         efficiency_ratio = drawdown_saved / hedge_cost
@@ -340,44 +349,63 @@ def generate_attribution_report(current_equity, hedge_pnl):
     else:
         print(f"⚠️ DRAG: Efficiency {efficiency_ratio:.2f}x")
     print("-----------------------------------")
-    if os.path.exists(STATE_FILE): os.remove(STATE_FILE)
+
+    if os.path.exists(STATE_FILE):
+        os.remove(STATE_FILE)
 
 
 # --- 🚀 EXECUTION ENGINE ---
 def execute_omni_hedge():
-    print(f"\n🧱 SMART HEDGE (OMNI: GAMMA+LIQUIDITY AWARE) {datetime.now().strftime('%H:%M')}")
-    # 🚨 SAFETY FIX: LIQUIDITY WAKE-UP
-    # Market Makers widen spreads at 9:30. We wait for 9:35 AM to get real IV data.
     ny_time = datetime.now(pytz.timezone('US/Eastern'))
+    print(f"\n🧱 SMART HEDGE CHECK: {ny_time.strftime('%H:%M:%S')}")
+
+    # SAFETY: Wait for liquidity at market open
     if ny_time.hour == 9 and ny_time.minute < 35:
         print("⏳ Market Opening... Waiting for spreads to normalize (9:35 AM).")
-        return  # Skip this loop, wait for next heartbeat
+        return
+
+    # Check for existing vega positions to exit
     check_vega_exit()
+
     account = api.get_account()
     equity = float(account.portfolio_value)
 
     # 1. DATA & REGIME
     spy_price, atr, gap, rv, iv = get_market_internals()
-    if not spy_price: return
+    if not spy_price:
+        print("❌ Cannot get market data, skipping hedge")
+        return
 
+    print(f"📊 SPY: ${spy_price:.2f} | Gap: {gap:.2%} | ATR: {atr:.2%} | IV: {iv:.1%}")
+
+    # FRAGILITY DETECTION (FIXED)
     is_fragile = False
     reason = "Stable"
+
     if gap > GAP_THRESHOLD:
-        is_fragile = True; reason = f"Gap {gap:.2%}"
-    elif atr > 0.008:
-        is_fragile = True; reason = f"HiVol {atr:.2%}"
+        is_fragile = True
+        reason = f"Gap {gap:.2%} > {GAP_THRESHOLD:.2%}"
+    elif atr > ATR_THRESHOLD:  # FIXED: Now uses constant instead of hardcoded 0.008
+        is_fragile = True
+        reason = f"ATR {atr:.2%} > {ATR_THRESHOLD:.2%}"
 
     # IV-RV Filter
     vol_spread = iv - rv
     is_vol_cheap = vol_spread < MAX_VOL_SPREAD
-    print(f"📊 VOL: IV={iv:.1%} | RV={rv:.1%} | Spread={vol_spread:.1%}")
+    print(f"📊 VOL: IV={iv:.1%} | RV={rv:.1%} | Spread={vol_spread:.1%} | Cheap: {is_vol_cheap}")
 
-    ny_time = datetime.now(pytz.timezone('US/Eastern'))
+    # CLOSING WINDOW (FIXED LOGIC)
     is_closing_window = (ny_time.hour == 15 and ny_time.minute >= 50)
 
+    # DECISION LOGIC (FIXED)
     if not is_fragile and not is_closing_window:
-        print(f"✅ Market Stable ({reason}). No Hedge.")
+        print(f"✅ Market Stable ({reason}). No Hedge Needed.")
         return
+
+    if is_fragile:
+        print(f"⚠️ FRAGILE MARKET: {reason}")
+    if is_closing_window:
+        print(f"🌙 CLOSING WINDOW: Deploying overnight protection")
 
     # 2. BUDGET & BETA
     excess_vol = max(0, atr - 0.005)
@@ -386,14 +414,16 @@ def execute_omni_hedge():
     target_budget_pct = STRESS_DAILY_COST if is_fragile else BASE_DAILY_COST
     total_budget = equity * target_budget_pct
 
-    print(f"⚠️ Hedge Active: {reason} | StressBeta: {stress_beta:.2f} | Budget: ${total_budget:.2f}")
+    print(f"💰 Hedge Budget: ${total_budget:.2f} ({target_budget_pct:.2%}) | StressBeta: {stress_beta:.2f}")
 
     total_cost_incurred = 0
 
     # --- LAYER A: GAMMA (Open/Close Shock) ---
     if is_closing_window or is_fragile:
-        print("🛡️ Optimizing Layer A (Gamma)...")
-        contract_a, price_a, greeks_a = scan_and_select_contract(spy_price, 1, iv, goal='delta', target_val=0.40)
+        print("\n🛡️ Layer A (Gamma Protection)...")
+        contract_a, price_a, greeks_a = scan_and_select_contract(
+            spy_price, 1, iv, goal='delta', target_val=0.40
+        )
 
         if contract_a and price_a > 0:
             actual_delta = abs(greeks_a['delta'])
@@ -402,17 +432,24 @@ def execute_omni_hedge():
 
             qty_a = int(target_hedge_deltas / (actual_delta * 100))
             budget_a = total_budget * LAYER_A_BUDGET_SPLIT
+
             if (qty_a * price_a * 100) > budget_a:
                 qty_a = int(budget_a / (price_a * 100))
 
             if qty_a > 0:
-                submit_order(contract_a, qty_a, price_a, "Layer A")
-                total_cost_incurred += (qty_a * price_a * 100)
+                cost_a = submit_order(contract_a, qty_a, price_a, "Layer A (Gamma)")
+                total_cost_incurred += cost_a
+            else:
+                print("⚠️ Layer A: Quantity = 0 (budget too small)")
+        else:
+            print("❌ Layer A: No suitable contract found")
 
     # --- LAYER B: VEGA (Skew-Aware Convexity) ---
     if is_vol_cheap or is_fragile:
-        print("🚀 Optimizing Layer B (Vega)...")
-        contract_b, price_b, greeks_b = scan_and_select_contract(spy_price, 4, iv, goal='vega')
+        print("\n🚀 Layer B (Vega Protection)...")
+        contract_b, price_b, greeks_b = scan_and_select_contract(
+            spy_price, 4, iv, goal='vega'
+        )
 
         if contract_b and price_b > 0:
             actual_vega = greeks_b['vega']
@@ -424,23 +461,28 @@ def execute_omni_hedge():
                 qty_b = int(budget_b / (price_b * 100))
 
             if qty_b > 0:
-                submit_order(contract_b, qty_b, price_b, "Layer B")
-                total_cost_incurred += (qty_b * price_b * 100)
+                cost_b = submit_order(contract_b, qty_b, price_b, "Layer B (Vega)")
+                total_cost_incurred += cost_b
+            else:
+                print("⚠️ Layer B: Quantity = 0 (budget too small)")
+        else:
+            print("❌ Layer B: No suitable contract found")
     else:
         print("⏸️ Layer B Skipped (Vol Expensive)")
 
-    save_hedge_state(equity, total_cost_incurred)
+    if total_cost_incurred > 0:
+        save_hedge_state(equity, total_cost_incurred)
+    else:
+        print("⚠️ No hedges placed (all contracts failed or qty=0)")
 
 
 def check_vega_exit():
     """
-    🚨 FIX 2: VEGA STOP LOSS
-    If IV crashes, we exit Layer B to stop the bleed.
+    Exit hedges if IV collapses
     """
     try:
         spy_price, _, _, _, current_iv = get_market_internals()
-        # Heuristic: If IV drops below 12% (Calm), kill hedges
-        if current_iv < 0.12:
+        if spy_price and current_iv < 0.12:
             print(f"📉 IV COLLAPSE ({current_iv:.1%}). Exiting Hedges.")
             close_all_hedges()
     except:
@@ -449,30 +491,53 @@ def check_vega_exit():
 
 def submit_order(contract, qty, price, label):
     symbol = contract['symbol'] if isinstance(contract, dict) else contract.symbol
-
     limit = round(price * 1.01, 2)
-    print(f"👉 EXEC {label}: {qty}x {symbol} @ ${limit}")
+
+    print(f"👉 SUBMITTING {label}: {qty}x {symbol} @ ${limit}")
+
     try:
-        api.submit_order(symbol=symbol, qty=qty, side='buy', type='limit', limit_price=limit,
-                         time_in_force='day')
+        api.submit_order(
+            symbol=symbol,
+            qty=qty,
+            side='buy',
+            type='limit',
+            limit_price=limit,
+            time_in_force='day'
+        )
+        cost = qty * price * 100
+        print(f"✅ Order submitted! Cost: ${cost:.2f}")
+        return cost
     except Exception as e:
-        print(f"Order Error: {e}")
+        print(f"❌ Order Error: {e}")
+        return 0
 
 
 def close_all_hedges():
-    print("\n⏰ CLOSING & ATTRIBUTION...")
+    print("\n⏰ CLOSING HEDGES & ATTRIBUTION...")
     total_hedge_pnl = 0
+
     try:
         positions = api.list_positions()
+        hedge_count = 0
+
         for p in positions:
+            # Options have symbols longer than 6 chars (e.g., SPY260130P00550000)
             if len(p.symbol) > 6:
-                total_hedge_pnl += float(p.unrealized_pl)
+                hedge_count += 1
+                pnl = float(p.unrealized_pl)
+                total_hedge_pnl += pnl
+                print(f"🛡️ Closing {p.symbol}: PnL ${pnl:.2f}")
                 api.close_position(p.symbol)
+
+        if hedge_count == 0:
+            print("ℹ️ No hedge positions to close")
+            return
 
         account = api.get_account()
         generate_attribution_report(float(account.equity), total_hedge_pnl)
-    except:
-        pass
+
+    except Exception as e:
+        print(f"❌ Close hedges error: {e}")
 
 
 if __name__ == "__main__":
