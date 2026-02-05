@@ -419,28 +419,28 @@ def run_hedge_fund():
     ny_time = datetime.now(pytz.timezone('US/Eastern'))
     # 1. MORNING & INTRADAY: Check for Vega Exit
     # If fear collapses (IV drops), we sell the hedge to save money.
-    if ny_time.hour == 10 and ny_time.minute == 0:  # Test at 10:00 AM
-        print("🧪 FORCING HEDGE TEST")
+    if ny_time.hour == 10 and 0 <= ny_time.minute <= 10:  # Test at 10:00 AM to 10:10 AM
+        print("FORCING HEDGE TEST")
         Smart_Hedge.execute_omni_hedge()
 
+    # 1. VEGA EXIT: Check all day if IV collapses
     if 9 <= ny_time.hour < 16:
         Smart_Hedge.check_vega_exit()
 
-    # 2. CLOSING BELL (3:55 PM): Deploy Overnight Protection
-    # We buy the "Gamma" layer here to protect against gap-downs tomorrow.
-    if ny_time.hour == 15 and 55 <= ny_time.minute <= 59:
+    # 2. MORNING HEDGE (9:30-9:50 AM): Check for gap/fragility
+    if ny_time.hour == 9 and 30 <= ny_time.minute <= 50:
+        Smart_Hedge.execute_omni_hedge()
+
+    # 3. CLOSING HEDGE (3:45-3:59 PM): Deploy overnight protection
+    if ny_time.hour == 15 and 45 <= ny_time.minute <= 59:
         # Check if we already have options (don't double buy)
         has_options = any(len(p.symbol) > 6 for p in positions)
         if not has_options:
             print("🛡️ CLOSING BELL: CALCULATING HEDGE.")
             Smart_Hedge.execute_omni_hedge()
 
-    # We check if the open is chaotic. (Note: The function itself handles the 9:35 delay).
-    if ny_time.hour == 9 and 30 <= ny_time.minute <= 50:
-        Smart_Hedge.execute_omni_hedge()
-
-    # Runs after market close to log how well the hedge did.
-    if ny_time.hour == 15 and 45 <= ny_time.minute <= 59:
+    # 4. AFTER HOURS (4:10-4:15 PM): Close hedges and run attribution
+    if ny_time.hour == 16 and 10 <= ny_time.minute <= 15:
         Smart_Hedge.close_all_hedges()
 
     # --- 2. HUNTING TRADES ---
