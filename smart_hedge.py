@@ -103,7 +103,8 @@ def get_market_internals():
 
 def fetch_option_contracts_manual(symbol, expiration_date=None):
     """
-    Manually fetches option contracts using the raw REST endpoint
+    SEARCHES for a list of option contracts (e.g., all SPY Puts for next week).
+    Endpoint: /v2/options/contracts
     """
     params = {
         'underlying_symbols': symbol,
@@ -114,23 +115,39 @@ def fetch_option_contracts_manual(symbol, expiration_date=None):
         params['expiration_date'] = expiration_date
 
     try:
+        # 🚨 FIX: Hit the CONTRACTS endpoint, not snapshots
         response = api.get('/options/contracts', data=params)
-        contracts = response.get('option_contracts', [])
-        if contracts:
-            print(f"✅ Found {len(contracts)} option contracts")
-        return contracts
+        return response.get('option_contracts', [])
     except Exception as e:
         print(f"❌ Contract Fetch Failed: {e}")
         return []
 
+def fetch_option_snapshot_manual(symbol):
+    """
+    GETS DATA for a single specific contract (e.g., Price, IV, Greeks).
+    Endpoint: /v2/options/snapshots/{symbol}
+    """
+    try:
+        # 🚨 FIX: Hit the SNAPSHOT endpoint
+        response = api.get(f'/options/snapshots/{symbol}')
+        return response
+    except Exception as e:
+        print(f"⚠️ Manual Snapshot Fetch Failed: {e}")
+        return None
+
 
 def get_real_iv_snapshot(spy_price):
+    """
+    Fetches ATM IV.
+    Priority: Alpaca Snapshot (Manual) -> Yahoo Option Chain -> Fallback (0.18)
+    """
     try:
         today = date.today()
         target_date = today + timedelta(days=5)
         exp_str = target_date.strftime('%Y-%m-%d')
 
         try:
+            # 1. SEARCH for contracts (List)
             contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_str)
 
             if contracts_data:
@@ -141,14 +158,26 @@ def get_real_iv_snapshot(spy_price):
                 atm_c = min(contracts_data, key=lambda x: abs(get_strike(x) - spy_price))
                 symbol = atm_c['symbol'] if isinstance(atm_c, dict) else atm_c.symbol
 
-                snap = api.get_option_snapshot(symbol)
-                if snap.implied_volatility and snap.implied_volatility > 0.01:
-                    print(f"⚡ IV Source: Alpaca ({snap.implied_volatility:.1%})")
-                    return snap.implied_volatility
+                # 2. GET SNAPSHOT for that specific symbol (Data)
+                # 🚨 FIX: Call the SNAPSHOT helper here
+                snap = fetch_option_snapshot_manual(symbol)
+
+                if snap:
+                    # Handle Dict Response safely
+                    iv = snap.get('implied_volatility')
+                    if iv is None and 'greeks' in snap:
+                        iv = snap['greeks'].get('implied_volatility')
+
+                    if iv and float(iv) > 0.01:
+                        print(f"⚡ IV Source: Alpaca ({float(iv):.1%})")
+                        return float(iv)
 
         except Exception as e:
             print(f"⚠️ Alpaca IV Failed: {e}")
 
+        # ---------------------------------------------------------
+        # 🟡 ATTEMPT 2: YAHOO FINANCE OPTION CHAIN (Reliable Fallback)
+        # ---------------------------------------------------------
         print("🔄 Switching to Yahoo Finance for IV...")
         try:
             spy = yf.Ticker("SPY")
@@ -158,14 +187,14 @@ def get_real_iv_snapshot(spy_price):
                 print("⚠️ No Yahoo expirations found.")
                 return 0.18
 
+            # Find closest expiration
             closest_exp = min(exps, key=lambda x: abs((datetime.strptime(x, '%Y-%m-%d').date() - target_date).days))
 
             # Download the specific chain
             chain = spy.option_chain(closest_exp)
             puts = chain.puts
 
-            # Find ATM Put in Yahoo Data
-            # Sort by distance to current price
+            # Find ATM Put
             puts['dist'] = abs(puts['strike'] - spy_price)
             atm_row = puts.sort_values('dist').iloc[0]
 
@@ -180,6 +209,7 @@ def get_real_iv_snapshot(spy_price):
     except Exception as e:
         print(f"❌ Critical IV Failure: {e}")
 
+    # 🔴 ATTEMPT 3: HARD FALLBACK
     print("⚠️ Data Blind. Using Default Stress IV (18%)")
     return 0.18
 
@@ -190,18 +220,20 @@ def find_real_quote(symbol):
     """
     # 1. Try Alpaca First
     try:
-        snap = api.get_option_snapshot(symbol)
-        bid = snap.latest_quote.bid_price
-        ask = snap.latest_quote.ask_price
+        snap = fetch_option_snapshot_manual(symbol)
+        if snap and 'latest_quote' in snap:
+            quote = snap['latest_quote']
+            bid = float(quote.get('bid_price', 0))
+            ask = float(quote.get('ask_price', 0))
 
-        if ask > 0 and bid > 0:
-            mid = (bid + ask) / 2
-            spread_pct = (ask - bid) / mid
-            if spread_pct < SPREAD_LIMIT:
-                print(f"✅ Alpaca quote: ${ask} (spread: {spread_pct:.1%})")
-                return ask
-            else:
-                print(f"⚠️ Alpaca spread too wide ({spread_pct:.1%}), trying Yahoo")
+            if ask > 0 and bid > 0:
+                mid = (bid + ask) / 2
+                spread_pct = (ask - bid) / mid
+                if spread_pct < SPREAD_LIMIT:
+                    print(f"✅ Alpaca quote: ${ask} (spread: {spread_pct:.1%})")
+                    return ask
+                else:
+                    print(f"⚠️ Alpaca spread too wide ({spread_pct:.1%}), trying Yahoo")
     except Exception as e:
         print(f"⚠️ Alpaca snapshot failed: {e}")
 
@@ -272,14 +304,14 @@ def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_v
 
         for cand in top_candidates:
             symbol = cand['contract']['symbol'] if isinstance(cand['contract'], dict) else cand['contract'].symbol
-            real_price = find_real_quote(symbol)  
+            real_price = find_real_quote(symbol)
 
             if real_price <= 0: continue
 
             if goal == 'delta':
                 final_score = cand['score']
             elif goal == 'vega':
-                final_score = cand['score'] / real_price  
+                final_score = cand['score'] / real_price
 
             if final_score > best_real_score:
                 best_real_score = final_score
@@ -376,7 +408,7 @@ def execute_omni_hedge():
     if gap > GAP_THRESHOLD:
         is_fragile = True
         reason = f"Gap {gap:.2%} > {GAP_THRESHOLD:.2%}"
-    elif atr > ATR_THRESHOLD:  
+    elif atr > ATR_THRESHOLD:
         is_fragile = True
         reason = f"ATR {atr:.2%} > {ATR_THRESHOLD:.2%}"
 
@@ -386,7 +418,7 @@ def execute_omni_hedge():
     print(f"📊 VOL: IV={iv:.1%} | RV={rv:.1%} | Spread={vol_spread:.1%} | Cheap: {is_vol_cheap}")
 
     # CLOSING WINDOW (FIXED LOGIC)
-    is_closing_window = (ny_time.hour == 15 and ny_time.minute >= 45)  
+    is_closing_window = (ny_time.hour == 15 and ny_time.minute >= 45)
 
     # DECISION LOGIC (FIXED)
     if not is_fragile and not is_closing_window:
