@@ -139,62 +139,69 @@ def fetch_option_snapshot_manual(symbol):
 def get_real_iv_snapshot(spy_price):
     """
     Fetches ATM IV.
-    Priority: Alpaca Snapshot (Manual) -> Yahoo Option Chain -> Fallback (0.18)
+    Priority: Alpaca Snapshot (Loop top 5) -> Yahoo Option Chain -> Fallback (0.18)
     """
     try:
         today = date.today()
+        # Look ~5 days out (standard weekly)
         target_date = today + timedelta(days=5)
         exp_str = target_date.strftime('%Y-%m-%d')
 
+        # ---------------------------------------------------------
+        # 🟢 ATTEMPT 1: ALPACA (Try Top 5 Candidates)
+        # ---------------------------------------------------------
         try:
-            # 1. SEARCH for contracts (List)
             contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_str)
 
             if contracts_data:
-                # Find ATM Contract
+                # Helper to get strike safely
                 def get_strike(c):
                     return float(c['strike_price']) if isinstance(c, dict) else float(c.strike_price)
 
-                atm_c = min(contracts_data, key=lambda x: abs(get_strike(x) - spy_price))
-                symbol = atm_c['symbol'] if isinstance(atm_c, dict) else atm_c.symbol
+                # Sort contracts by distance to current price (Closest first)
+                sorted_contracts = sorted(contracts_data, key=lambda x: abs(get_strike(x) - spy_price))
 
-                # 2. GET SNAPSHOT for that specific symbol (Data)
-                # 🚨 FIX: Call the SNAPSHOT helper here
-                snap = fetch_option_snapshot_manual(symbol)
+                # 🔄 LOOP: Try the top 5 candidates in case the first one is 404/Broken
+                for candidate in sorted_contracts[:5]:
+                    symbol = candidate['symbol'] if isinstance(candidate, dict) else candidate.symbol
 
-                if snap:
-                    # Handle Dict Response safely
-                    iv = snap.get('implied_volatility')
-                    if iv is None and 'greeks' in snap:
-                        iv = snap['greeks'].get('implied_volatility')
+                    # Try to fetch snapshot
+                    snap = fetch_option_snapshot_manual(symbol)
 
-                    if iv and float(iv) > 0.01:
-                        print(f"⚡ IV Source: Alpaca ({float(iv):.1%})")
-                        return float(iv)
+                    if snap:
+                        # Extract IV safely
+                        iv = snap.get('implied_volatility')
+                        if iv is None and 'greeks' in snap:
+                            iv = snap['greeks'].get('implied_volatility')
+
+                        # If we found valid IV, return immediately
+                        if iv and float(iv) > 0.01:
+                            print(f"⚡ IV Source: Alpaca ({float(iv):.1%}) via {symbol}")
+                            return float(iv)
+
+                    # If we get here, that specific contract failed, loop to next one...
 
         except Exception as e:
-            print(f"⚠️ Alpaca IV Failed: {e}")
+            print(f"⚠️ Alpaca IV Loop Failed: {e}")
 
         # ---------------------------------------------------------
-        # 🟡 ATTEMPT 2: YAHOO FINANCE OPTION CHAIN (Reliable Fallback)
+        # 🟡 ATTEMPT 2: YAHOO FINANCE (With Better Debugging)
         # ---------------------------------------------------------
         print("🔄 Switching to Yahoo Finance for IV...")
         try:
             spy = yf.Ticker("SPY")
-
             exps = spy.options
+
             if not exps:
-                print("⚠️ No Yahoo expirations found.")
+                print("⚠️ Yahoo Failed: No option expirations found (Rate Limit?)")
                 return 0.18
 
             # Find closest expiration
             closest_exp = min(exps, key=lambda x: abs((datetime.strptime(x, '%Y-%m-%d').date() - target_date).days))
+            print(f"   (Using Yahoo Chain: {closest_exp})")
 
-            # Download the specific chain
             chain = spy.option_chain(closest_exp)
             puts = chain.puts
-
-            # Find ATM Put
             puts['dist'] = abs(puts['strike'] - spy_price)
             atm_row = puts.sort_values('dist').iloc[0]
 
@@ -203,6 +210,7 @@ def get_real_iv_snapshot(spy_price):
             if yf_iv > 0.01:
                 print(f"⚡ IV Source: Yahoo Chain ({yf_iv:.1%})")
                 return yf_iv
+
         except Exception as e:
             print(f"⚠️ Yahoo IV Failed: {e}")
 
@@ -212,7 +220,6 @@ def get_real_iv_snapshot(spy_price):
     # 🔴 ATTEMPT 3: HARD FALLBACK
     print("⚠️ Data Blind. Using Default Stress IV (18%)")
     return 0.18
-
 
 def find_real_quote(symbol):
     """
