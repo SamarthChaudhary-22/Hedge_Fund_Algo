@@ -139,11 +139,10 @@ def fetch_option_snapshot_manual(symbol):
 def get_real_iv_snapshot(spy_price):
     """
     Fetches ATM IV.
-    Priority: Alpaca Snapshot (Loop top 5) -> Yahoo Option Chain -> Fallback (0.18)
+    Priority: Alpaca Snapshot (Loop) -> Yahoo Option Chain -> Fallback (0.18)
     """
     try:
         today = date.today()
-        # Look ~5 days out (standard weekly)
         target_date = today + timedelta(days=5)
         exp_str = target_date.strftime('%Y-%m-%d')
 
@@ -154,38 +153,29 @@ def get_real_iv_snapshot(spy_price):
             contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_str)
 
             if contracts_data:
-                # Helper to get strike safely
                 def get_strike(c):
                     return float(c['strike_price']) if isinstance(c, dict) else float(c.strike_price)
 
-                # Sort contracts by distance to current price (Closest first)
                 sorted_contracts = sorted(contracts_data, key=lambda x: abs(get_strike(x) - spy_price))
 
-                # 🔄 LOOP: Try the top 5 candidates in case the first one is 404/Broken
+                # Loop through top 5 to find ONE valid snapshot
                 for candidate in sorted_contracts[:5]:
                     symbol = candidate['symbol'] if isinstance(candidate, dict) else candidate.symbol
-
-                    # Try to fetch snapshot
                     snap = fetch_option_snapshot_manual(symbol)
 
                     if snap:
-                        # Extract IV safely
                         iv = snap.get('implied_volatility')
-                        if iv is None and 'greeks' in snap:
-                            iv = snap['greeks'].get('implied_volatility')
+                        if iv is None and 'greeks' in snap: iv = snap['greeks'].get('implied_volatility')
 
-                        # If we found valid IV, return immediately
                         if iv and float(iv) > 0.01:
                             print(f"⚡ IV Source: Alpaca ({float(iv):.1%}) via {symbol}")
                             return float(iv)
-
-                    # If we get here, that specific contract failed, loop to next one...
-
         except Exception as e:
-            print(f"⚠️ Alpaca IV Loop Failed: {e}")
+            # Don't print full stack trace for Alpaca, it's expected to fail on Paper
+            pass
 
-        # ---------------------------------------------------------
-        # 🟡 ATTEMPT 2: YAHOO FINANCE (With Better Debugging)
+            # ---------------------------------------------------------
+        # 🟡 ATTEMPT 2: YAHOO FINANCE (Bulletproof Version)
         # ---------------------------------------------------------
         print("🔄 Switching to Yahoo Finance for IV...")
         try:
@@ -193,26 +183,43 @@ def get_real_iv_snapshot(spy_price):
             exps = spy.options
 
             if not exps:
-                print("⚠️ Yahoo Failed: No option expirations found (Rate Limit?)")
+                print("⚠️ Yahoo Failed: No option expirations found.")
                 return 0.18
 
             # Find closest expiration
             closest_exp = min(exps, key=lambda x: abs((datetime.strptime(x, '%Y-%m-%d').date() - target_date).days))
             print(f"   (Using Yahoo Chain: {closest_exp})")
 
+            # Force data download
             chain = spy.option_chain(closest_exp)
             puts = chain.puts
+
+            if puts.empty:
+                print(f"⚠️ Yahoo Puts table is empty for {closest_exp}")
+                return 0.18
+
+            # Robust ATM finding
             puts['dist'] = abs(puts['strike'] - spy_price)
-            atm_row = puts.sort_values('dist').iloc[0]
+            # Filter for strikes that actually have Volume/Open Interest to ensure real data
+            valid_puts = puts[puts['impliedVolatility'] > 0.01]
+
+            if valid_puts.empty:
+                print("⚠️ No valid IVs found in Yahoo chain")
+                # Fallback to raw table if filtered is empty
+                atm_row = puts.sort_values('dist').iloc[0]
+            else:
+                atm_row = valid_puts.sort_values('dist').iloc[0]
 
             yf_iv = atm_row['impliedVolatility']
 
             if yf_iv > 0.01:
                 print(f"⚡ IV Source: Yahoo Chain ({yf_iv:.1%})")
                 return yf_iv
+            else:
+                print(f"⚠️ Yahoo IV was zero/invalid: {yf_iv}")
 
         except Exception as e:
-            print(f"⚠️ Yahoo IV Failed: {e}")
+            print(f"⚠️ Yahoo IV Error details: {e}")
 
     except Exception as e:
         print(f"❌ Critical IV Failure: {e}")
