@@ -156,7 +156,7 @@ def get_real_iv_snapshot(spy_price):
             if contracts_data:
                 def get_strike(c):
                     return float(c['strike_price']) if isinstance(c, dict) else float(c.strike_price)
-                
+
                 sorted_contracts = sorted(contracts_data, key=lambda x: abs(get_strike(x) - spy_price))
 
                 # Loop through top 50 to find ONE valid snapshot
@@ -179,57 +179,44 @@ def get_real_iv_snapshot(spy_price):
             # ---------------------------------------------------------
         # 🟡 ATTEMPT 2: YAHOO FINANCE (Bulletproof Version)
         # ---------------------------------------------------------
-        if iv_result == 0.18:
+        if iv_result == 0.18:  # If Alpaca didn't give us a result different from default
             print("🔄 Switching to Yahoo Finance for IV...")
             try:
                 spy = yf.Ticker("SPY")
                 exps = spy.options
-    
-                if not exps:
-                    print("⚠️ Yahoo Failed: No option expirations found.")
-                    return 0.18
-    
-                # Find closest expiration
+                if not exps: raise Exception("No Yahoo Expirations")
+
                 closest_exp = min(exps, key=lambda x: abs((datetime.strptime(x, '%Y-%m-%d').date() - target_date).days))
                 print(f"   (Using Yahoo Chain: {closest_exp})")
-    
-                # Force data download
+
                 chain = spy.option_chain(closest_exp)
                 puts = chain.puts
-    
-                if puts.empty:
-                    print(f"⚠️ Yahoo Puts table is empty for {closest_exp}")
-                    return 0.18
-    
-                # Robust ATM finding
-                puts['dist'] = abs(puts['strike'] - spy_price)
-                # Filter for strikes that actually have Volume/Open Interest to ensure real data
-                valid_puts = puts[puts['impliedVolatility'] > 0.01]
-    
-                if valid_puts.empty:
-                    print("⚠️ No valid IVs found in Yahoo chain")
-                    # Fallback to raw table if filtered is empty
-                    atm_row = puts.sort_values('dist').iloc[0]
-                else:
-                    atm_row = valid_puts.sort_values('dist').iloc[0]
-    
-                yf_iv = atm_row['impliedVolatility']
-    
-                if yf_iv > 0.01:
-                    print(f"⚡ IV Source: Yahoo Chain ({yf_iv:.1%})")
-                    return yf_iv
-                else:
-                    print(f"⚠️ Yahoo IV was zero/invalid: {yf_iv}")
-    
-            except Exception as e:
-                print(f"⚠️ Yahoo IV Error details: {e}")
 
+                if not puts.empty:
+                    # Filter for valid IVs (> 1%)
+                    valid_puts = puts[puts['impliedVolatility'] > 0.01]
+                    if not valid_puts.empty:
+                        valid_puts['dist'] = abs(valid_puts['strike'] - spy_price)
+                        atm_row = valid_puts.sort_values('dist').iloc[0]
+                        yf_iv = atm_row['impliedVolatility']
+
+                        print(f"⚡ IV Source: Yahoo Chain ({yf_iv:.1%})")
+                        iv_result = yf_iv
+
+            except Exception as e:
+                print(f"⚠️ Yahoo IV Failed: {e}")
     except Exception as e:
         print(f"❌ Critical IV Failure: {e}")
 
-    # 🔴 ATTEMPT 3: HARD FALLBACK
-    print("⚠️ Data Blind. Using Default Stress IV (18%)")
-    return 0.18
+        # ---------------------------------------------------------
+        # 🛡️ SANITY CHECK (The Fix)
+        # ---------------------------------------------------------
+        # If IV is suspiciously low (e.g. 1.6%), assume data error and clamp it.
+    if iv_result < 0.08:
+        print(f"⚠️ Detected Garbage Data (IV={iv_result:.1%}). Clamping to min 10%.")
+        return 0.10
+
+    return iv_result
 
 def find_real_quote(symbol):
     """
