@@ -303,6 +303,59 @@ def check_and_refresh_stale_orders():
     except Exception as e:
         print(f"⚠️ Stale Order Check Failed: {e}")
 
+def check_tape(symbol, lookback = 150):
+    try:
+        trades_resp = api.get_trades(symbol, limit=lookback, feed='iex')
+        trades = trades_resp.trades
+        if not trades or len(trades) < 30:
+            return {'signal': 'neutral', 'reason': 'insufficient_data.'}
+
+        buy_vol = 0
+        sell_vol = 0
+        last_aggressor = 0
+
+        for i in range(1, len(trades)):
+            price = float(trades[i].p)
+            prev_price = float(trades[i-1].p)
+            size = float(trades[i].s)
+
+            if price > prev_price:
+                buy_vol += size
+                last_aggressor = 1
+            elif price < prev_price:
+                sell_vol += size
+                last_aggressor = -1
+            else:
+                if last_aggressor == 1:
+                    buy_vol += size
+                elif last_aggressor == -1:
+                    sell_vol += size
+
+        total_vol = buy_vol + sell_vol
+        if total_vol == 0:
+            return {'signal': 'neutral', 'reason': 'insufficient_data.'}
+
+        buy_ratio = buy_vol / total_vol
+
+        start_price = float(trades[0].p)
+        end_price = float(trades[-1].p)
+        price_delta = (end_price - start_price) / start_price
+        print(f"Buys: {buy_ratio: .2%} | Price Move: {price_delta: .2%}")
+
+        stagnation_threshold = 0.0005
+
+        if buy_ratio > 0.70 and price_delta < stagnation_threshold:
+            print(f"🧱 DETECTED HIDDEN SELL WALL! (Absorption at ${end_price})")
+            return {'signal': 'sell_wall', 'reason': f"Absorption: {buy_ratio: .2%} Buys but price flat {price_delta: .2%}"}
+
+        if buy_ratio < 0.30 and price_delta >= -stagnation_threshold:
+            print(f"🧱 DETECTED HIDDEN BUY WALL! (Absorption at ${end_price})")
+            return {'signal' : 'buy_wall', 'reason': f"Absorption: {1-buy_ratio: .2%} Sells but price flat {price_delta: .2%}"}
+
+        return {'signal': 'clear', 'reason' : f'Normal Flow: {buy_ratio: .2%} Buy ratio, Move {price_delta: .2%}'}
+
+    except Exception as e:
+        print(f"⚠️ Error: {e}")
 
 def run_hedge_fund():
     print(f"--- 🐺 Hedge Fund vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
@@ -508,6 +561,12 @@ def run_hedge_fund():
                     reason = "Trend + News"
 
         if signal:
+            print(f"Reading Tape for : {symbol}")
+            tape_data = check_tape(symbol)
+
+            if signal == 'buy' and tape_data['signal'] == 'sell_wall':
+                print(f"⛔ Abort Buy {symbol}: {tape_data['reason']}")
+                continue
             target_amount = (equity * 1.50) / MAX_POSITIONS
             shares = int(target_amount / price)
             if shares > 0:
