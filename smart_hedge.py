@@ -278,6 +278,7 @@ def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_v
         contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_date)
 
         if not contracts_data:
+            print(f"No contract data for {exp_date}. Trying next week")
             exp_date = (today + timedelta(days=days_out + 1)).strftime('%Y-%m-%d')
             contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_date)
 
@@ -309,7 +310,7 @@ def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_v
             candidates.append({'contract': c, 'greeks': greeks, 'score': score})
 
         candidates.sort(key=lambda x: x['score'], reverse=True)
-        top_candidates = candidates[:5]
+        top_candidates = candidates[:50]
 
         best_c = None
         best_real_score = -999
@@ -333,7 +334,13 @@ def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_v
                 best_price = real_price
                 best_greeks = cand['greeks']
 
-        return best_c, best_price, best_greeks
+        if best_c:
+            sym = best_c['symbol'] if isinstance(best_c, dict) else best_c.symbol
+            print(f"Found Contract at: {sym} at ${best_price:.2f}")
+            return best_c, best_price, best_greeks
+        else:
+            print(f"No contract data found.")
+            return None, 0, {}
 
     except Exception as e:
         print(f"❌ Contract selection error: {e}")
