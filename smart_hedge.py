@@ -259,82 +259,68 @@ def find_real_quote(symbol):
 # --- CONTRACT SELECTION ---
 def scan_and_select_contract(spy_price, days_out, iv_est, goal='delta', target_val=0.50, option_type='put'):
     today = date.today()
-    exp_date = (today + timedelta(days=days_out)).strftime('%Y-%m-%d')
-    T = days_out / 365.0
 
-    print(f"🔍 Scanning {option_type.upper()} contracts for {exp_date}")
+    for attempt in range(3):
+        # Shift days out for subsequent attempts (e.g., try Friday, then next Mon, then next Wed)
+        current_days_out = days_out + (attempt * 2)
+        target_date = today + timedelta(days=current_days_out)
+        exp_str = target_date.strftime('%Y-%m-%d')
+        T = current_days_out / 365.0
 
-    try:
-        contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_date)
+        print(f"🔍 Scanning {option_type.upper()} for {exp_str} (Attempt {attempt + 1}/3)...")
 
-        if not contracts_data:
-            print(f"No contract data for {exp_date}. Trying next week")
-            exp_date = (today + timedelta(days=days_out + 1)).strftime('%Y-%m-%d')
-            contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_date)
+        try:
+            contracts_data = fetch_option_contracts_manual('SPY', expiration_date=exp_str)
 
-        if not contracts_data: return None, 0, {}
+            if not contracts_data:
+                print(f"⚠️ No contracts found for {exp_str}, skipping date...")
+                continue  # Try next date
 
-        candidates = []
-        for c in contracts_data:
-            strike = float(c['strike_price']) if isinstance(c, dict) else float(c.strike_price)
-            if option_type == 'put':
-                if not (0.95 * spy_price < strike < 1.00 * spy_price): continue
-            else:
-                if not (1.0 * spy_price < strike < 1.05 * spy_price): continue
+            candidates = []
+            for c in contracts_data:
+                strike = float(c['strike_price']) if isinstance(c, dict) else float(c.strike_price)
 
-            # Pass option_type to greek calculator
-            greeks = calculate_greeks(spy_price, strike, T, 0.05, iv_est, option_type)
-            abs_delta = abs(greeks['delta'])
+                if option_type == 'put':
+                    if not (0.90 * spy_price < strike < 1.00 * spy_price): continue
+                else:
+                    if not (1.00 * spy_price < strike < 1.10 * spy_price): continue
 
-            score = 0
-            # --- SCORING ENGINE ---
-            if goal == 'delta':
-                delta_match = -abs(abs_delta - target_val)
-                gamma_boost = greeks['gamma'] * 100
-                score = delta_match + (gamma_boost * 0.5)
+                greeks = calculate_greeks(spy_price, strike, T, 0.05, iv_est, option_type)
+                abs_delta = abs(greeks['delta'])
+                score = 0
 
-            elif goal == 'vega':
-                if abs_delta < 0.05 or abs_delta > 0.40: continue
-                score = greeks['vega'] / (abs_delta + 0.1)
+                if goal == 'delta':
+                    delta_match = -abs(abs_delta - target_val)
+                    score = delta_match + (greeks['gamma'] * 100)
+                elif goal == 'vega':
+                    if abs_delta < 0.05 or abs_delta > 0.40: continue
+                    score = greeks['vega'] / (abs_delta + 0.1)
 
-            candidates.append({'contract': c, 'greeks': greeks, 'score': score})
+                candidates.append({'contract': c, 'greeks': greeks, 'score': score})
 
-        candidates.sort(key=lambda x: x['score'], reverse=True)
-        top_candidates = candidates[:50]
+            # Sort by score (Best matches first)
+            candidates.sort(key=lambda x: x['score'], reverse=True)
 
-        best_c = None
-        best_real_score = -999
-        best_price = 0
-        best_greeks = {}
+            top_candidates = candidates[:50]
+            print(f"🔎 Checking liquidity for top {len(top_candidates)} candidates...")
 
-        for cand in top_candidates:
-            symbol = cand['contract']['symbol'] if isinstance(cand['contract'], dict) else cand['contract'].symbol
-            real_price = find_real_quote(symbol)
+            for cand in top_candidates:
+                symbol = cand['contract']['symbol'] if isinstance(cand['contract'], dict) else cand['contract'].symbol
 
-            if real_price <= 0: continue
+                # Check if this specific contract has data
+                real_price = find_real_quote(symbol)
 
-            if goal == 'delta':
-                final_score = cand['score']
-            elif goal == 'vega':
-                final_score = cand['score'] / real_price
+                if real_price > 0:
+                    print(f"✅ FOUND LIVE CONTRACT: {symbol} @ ${real_price}")
+                    return cand['contract'], real_price, cand['greeks']
 
-            if final_score > best_real_score:
-                best_real_score = final_score
-                best_c = cand['contract']
-                best_price = real_price
-                best_greeks = cand['greeks']
 
-        if best_c:
-            sym = best_c['symbol'] if isinstance(best_c, dict) else best_c.symbol
-            print(f"Found Contract at: {sym} at ${best_price:.2f}")
-            return best_c, best_price, best_greeks
-        else:
-            print(f"No contract data found.")
-            return None, 0, {}
+        except Exception as e:
+            print(f"❌ Scan Error on {exp_str}: {e}")
+            continue
 
-    except Exception as e:
-        print(f"❌ Contract selection error: {e}")
-        return None, 0, {}
+    print("❌ Exhausted all search attempts. No tradeable contracts found.")
+    return None, 0, {}
 
 
 # --- 📝 ATTRIBUTION ---
