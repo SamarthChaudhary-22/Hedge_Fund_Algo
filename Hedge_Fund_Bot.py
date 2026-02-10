@@ -305,8 +305,9 @@ def check_and_refresh_stale_orders():
 
 def check_tape(symbol, lookback = 150):
     try:
-        trades_resp = api.get_trades(symbol, limit=lookback, feed='iex')
-        trades = trades_resp.trades
+        start_date = (datetime.now() - timedelta(days=lookback)).strftime('%Y-%m-%d')
+        trades_resp = api.get_trades(symbol, start = start_date, limit=lookback, feed='iex')
+        trades = list(trades_resp)
         if not trades or len(trades) < 30:
             return {'signal': 'neutral', 'reason': 'insufficient_data.'}
 
@@ -356,6 +357,7 @@ def check_tape(symbol, lookback = 150):
 
     except Exception as e:
         print(f"⚠️ Error: {e}")
+        return {'signal': 'neutral', 'reason' : f"Error: {e}"}
 
 def run_hedge_fund():
     print(f"--- 🐺 Hedge Fund vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
