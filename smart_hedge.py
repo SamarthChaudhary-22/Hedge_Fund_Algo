@@ -194,7 +194,7 @@ def get_real_iv_snapshot(spy_price):
 
                 if not puts.empty:
                     # Filter for valid IVs (> 1%)
-                    valid_puts = puts[puts['impliedVolatility'] > 0.01]
+                    valid_puts = puts[puts['impliedVolatility'] > 0.01].copy()
                     if not valid_puts.empty:
                         valid_puts['dist'] = abs(valid_puts['strike'] - spy_price)
                         atm_row = valid_puts.sort_values('dist').iloc[0]
@@ -547,3 +547,4 @@ def close_all_hedges():
 
 if __name__ == "__main__":
     execute_omni_hedge()
+
