@@ -316,9 +316,12 @@ def check_tape(symbol, lookback = 150):
         last_aggressor = 0
 
         for i in range(1, len(trades)):
-            price = float(trades[i].p)
-            prev_price = float(trades[i-1].p)
-            size = float(trades[i].s)
+            raw_curr = trades[i]._raw
+            raw_prev = trades[i - 1]._raw
+
+            price = float(raw_curr.get('p', raw_curr.get('price', 0)))
+            prev_price = float(raw_prev.get('p', raw_prev.get('price', 0)))
+            size = float(raw_curr.get('s', raw_curr.get('size', 0)))
 
             if price > prev_price:
                 buy_vol += size
@@ -338,8 +341,8 @@ def check_tape(symbol, lookback = 150):
 
         buy_ratio = buy_vol / total_vol
 
-        start_price = float(trades[0].p)
-        end_price = float(trades[-1].p)
+        start_price = float(trades[0]._raw.get('p', trades[0]._raw.get('price', 0)))
+        end_price = float(trades[-1]._raw.get('p', trades[-1]._raw.get('price', 0)))
         price_delta = (end_price - start_price) / start_price
         print(f"Buys: {buy_ratio: .2%} | Price Move: {price_delta: .2%}")
 
