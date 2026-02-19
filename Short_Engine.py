@@ -384,7 +384,7 @@ def check_tape(symbol, lookback = 150):
         buy_ratio = buy_vol / total_vol
 
         start_price = float(trades[0]._raw.get('p', trades[0]._raw.get('price', 0)))
-        end_price = float(trades[-1].raw.get('p', trades[-1]._raw.get('price', 0)))
+        end_price = float(trades[-1]._raw.get('p', trades[-1]._raw.get('price', 0)))
         if start_price == 0:
             return {'signal': 'neutral', 'reason': 'zero_price'}
         price_delta = (end_price - start_price)/start_price
@@ -478,8 +478,7 @@ def run_short_engine():
             _, z, _, _ = get_technical_data(symbol)
             if z is not None:
                 if z < EXIT_Z_SHORT and pct_profit > 0.01:
-                    close_position(symbol, f"Panic Cover (Z:{z:.2f} < {EXIT_Z_SHORT})")
-                    success = close_position(symbol, qty)
+                    success = close_position(symbol, f"Panic Cover (Z:{z:.2f} < {EXIT_Z_SHORT})", qty)
                     if success is False:
                         continue
                     short_count -= 1
