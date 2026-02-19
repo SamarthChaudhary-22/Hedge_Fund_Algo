@@ -576,8 +576,7 @@ def run_hedge_fund():
             shares = int(target_amount / price)
             if shares > 0:
                 print(f"\n🚀 {signal.upper()}: {symbol} | {reason}")
-                place_order(symbol, shares, signal, price, 'entry')
-                success = place_order(symbol, shares, "buy", price)
+                success = place_order(symbol, shares, signal, price, 'entry')
                 if success is False:
                     continue
                 cash -= (shares * price)
