@@ -405,6 +405,39 @@ def check_tape(symbol, lookback = 150):
     except Exception as e:
         print(f"⚠️ Error: {e}")
         return {'signal': 'neutral', 'reason' : f"Error: {e}"}
+def check_opposing_direction(symbol, intended_direction):
+    try:
+        pos = api.get_position(symbol)
+        qty = float(pos.qty)
+        entry_price = float(pos.avg_entry_price)
+        current_price = float(pos.current_price)
+
+        is_long = qty >0
+        is_short = qty < 0
+
+        if (intended_direction == 'long' and is_long) or (intended_direction == 'short' and is_short):
+            return True
+        if is_long:
+            pct_profit = (current_price - entry_price)/entry_price *100
+        else:
+            pct_profit = (entry_price - current_price)/entry_price *100
+
+        if pct_profit < -0.025:
+            open_orders = api.list_orders(status='open',symbols=[symbol])
+            for o in open_orders:
+                api.cancel_order(o.id)
+
+            api.close_position(symbol)
+            time.sleep(2)
+            return True
+        else:
+            return False
+    except Exception as e:
+        if 'position does not exist' in str(e).lower():
+            return True
+        else:
+            print(f"Error Finding Position:{symbol}, {e}")
+            return False
 
 def run_short_engine():
     print(f"--- 🐻 GRIZZLY SHORT ENGINE vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
@@ -566,6 +599,10 @@ def run_short_engine():
 
                         if z > ENTRY_Z_SHORT and tape_data['signal'] == 'buy_wall':
                             print(f"⛔ Abort Shorting {symbol} : {tape_data['reason']}")
+                            continue
+
+                        can_proceed = check_opposing_direction(symbol, 'short')
+                        if not can_proceed:
                             continue
 
                         reason = f"Breakdown Short (Price < SMA50 & Z:{z:.2f} | CMF Slope: {cmf_slope:.2f})"
