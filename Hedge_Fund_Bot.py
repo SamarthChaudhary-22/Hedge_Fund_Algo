@@ -361,6 +361,41 @@ def check_tape(symbol, lookback = 150):
     except Exception as e:
         print(f"⚠️ Error: {e}")
         return {'signal': 'neutral', 'reason' : f"Error: {e}"}
+def check_oppossing_position(symbol, intended_direction):
+    try:
+        pos = api.get_position(symbol)
+        qty = float(pos.qty)
+        entry_price = float(pos.avg_entry_price)
+        current_price = float(pos.current_price)
+
+        is_long = qty < 0
+        is_short = qty > 0
+
+        if (intended_direction == 'long' and is_long) or (intended_direction == 'short' and is_short):
+            return True
+
+        if is_long:
+            pct_profit = (current_price - entry_price) / entry_price * 100
+        else:
+            pct_profit = (entry_price - current_price) / entry_price * 100
+
+        if pct_profit < -0.025:
+            open_orders = api.list_orders(status='open', symbols=[symbol])
+            for o in open_orders:
+                api.cancel_order(o.id)
+
+            api.close_position(symbol)
+            time.sleep(2)
+            return True
+        else:
+            return False
+    except Exception as e:
+        if 'position does not exist' in str(e).lower():
+            return True
+        else:
+            print(f"Error Checking Position: {symbol}, {e}")
+            return False
+
 
 def run_hedge_fund():
     print(f"--- 🐺 Hedge Fund vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
@@ -571,6 +606,9 @@ def run_hedge_fund():
 
             if signal == 'buy' and tape_data['signal'] == 'sell_wall':
                 print(f"⛔ Abort Buy {symbol}: {tape_data['reason']}")
+                continue
+            can_proceed = check_oppossing_position(symbol, 'long')
+            if not can_proceed:
                 continue
             target_amount = (equity * 1.50) / MAX_POSITIONS
             shares = int(target_amount / price)
