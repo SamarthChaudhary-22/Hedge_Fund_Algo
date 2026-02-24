@@ -1,4 +1,5 @@
 statsmodels
 tqdm
 yfinance
+lxml
 
