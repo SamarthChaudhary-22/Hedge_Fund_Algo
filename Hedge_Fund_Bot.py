@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytz
 import yfinance as yf
 import smart_hedge as Smart_Hedge
+import json
 
 # --- 🏆 FINAL CONFIGURATION (Rank #1: 71,680% Return) ---
 API_KEY = os.getenv('APCA_API_KEY_ID')
@@ -165,6 +166,32 @@ def get_market_fear_index():
     except Exception as e:
         print(f"Error in get_market_fear_index: {e}")
         return False
+
+
+class FactorOrthogonalizer:
+    def __init__(self, weights_filepath = 'factor_weights.json'):
+        try:
+            with open(weights_filepath, 'r') as f:
+                self.weights = json.load(f)
+                print(f"factor_weights loaded from {weights_filepath}")
+        except Exception as e:
+            print(f"Error in factor_weights: {e}")
+            self.weights = {}
+
+    def clean_weights(self, symbol, raw_z, raw_c, raw_s):
+        if symbol not in self.weights:
+            return raw_z, raw_c, raw_s
+
+        w = self.weights[symbol]
+        orth_z = raw_z/w['sigma_Z']
+        sigma_c = w.get('Sigma_C_res', w.get('sigma_C_res', 1.0))
+        orth_c = (raw_c - w['alpha_C'] - (w['beta_C_Z'] * orth_z)) / sigma_c
+        orth_s = (raw_s -w['alpha_S'] - (w['beta_S_Z'] * orth_z) - (w['beta_S_C'] * orth_c)) / w['sigma_S_res']
+
+        return orth_z, orth_c, orth_s
+
+orthoganolizer = FactorOrthogonalizer()
+
 
 
 def place_order(symbol, qty, side, current_price, order_type_label="manual"):
@@ -576,36 +603,29 @@ def run_hedge_fund():
         if i % 10 == 0: print(f"Scanned {i}/{len(all_tickers)}...", end='\r')
         time.sleep(0.5)
 
-        price, z, sma_50, cmf_slope = get_technical_data(symbol)
+        price, raw_z, raw_sma, raw_cmf = get_technical_data(symbol)
         if price is None: continue
-        print(f"🔍Checking {symbol} | Price: {price} | Z: {z} | SMA: {sma_50} | CMF: {cmf_slope:.2f}")
+        pure_z, pure_c, pure_s = orthoganolizer.clean_weights(symbol, raw_z, raw_cmf, raw_sma)
+        print(f"🔍Checking {symbol} | Price: {price} | Z: {pure_z: .2f}σ | Vol: {pure_c:.2f}σ | Trend: {pure_s: .2f}σ ")
 
-        regime = regime_map.get(symbol, 'MEAN_REVERSION')
-        signal = None
+        signal = 'hold'
         reason = ""
-
-        if is_panic and regime == 'TRENDING': continue
-
+        regime = regime_map.get(symbol, 'MEAN_REVERSION')
         if regime == 'MEAN_REVERSION':
-            if z < ENTRY_Z and cmf_slope > 0 :
-                sent_score, consensus = get_sentiment_consensus(symbol)
-                if sent_score > -0.8:
-                    signal = 'buy'
-                    reason = f"Oversold Z:{z:.2f}"
+            if pure_z < -2.0 and pure_c > 1.0 and pure_s > -1.0:
+                signal = 'buy'
+                reason = f"Oversold Z:{pure_z:.2f}"
+        elif regime == 'TRENDING':
+            if pure_s > 1.5 and pure_z < 0.0 and pure_c > 0.5:
+                signal = 'buy'
+                reason = f"Trend Dip: Trend: {pure_s: .2f} | Vol: {pure_c:.2f}"
 
-        elif regime == 'TRENDING' and not is_panic:
-            if price > sma_50:
-                sent_score, consensus = get_sentiment_consensus(symbol)
-                if sent_score >= 0.6:
-                    signal = 'buy'
-                    reason = "Trend + News"
-
-        if signal:
+        if signal == 'buy':
             print(f"Reading Tape for : {symbol}")
             tape_data = check_tape(symbol)
 
-            if signal == 'buy' and tape_data['signal'] == 'sell_wall':
-                print(f"⛔ Abort Buy {symbol}: {tape_data['reason']}")
+            if tape_data['signal'] == 'sell_wall':
+                print(f"⛔ Abort Buying {symbol}: {tape_data['reason']}")
                 continue
             can_proceed = check_oppossing_position(symbol, 'long')
             if not can_proceed:
