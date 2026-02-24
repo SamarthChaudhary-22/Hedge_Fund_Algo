@@ -9,6 +9,7 @@ import yfinance as yf
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from datetime import datetime, timedelta, timezone
 import pytz
+import json
 
 # --- 🐻 GRIZZLY SHORT ENGINE vFinal (Harvest Mode) ---
 API_KEY = os.getenv('APCA_API_KEY_ID')
@@ -203,6 +204,32 @@ def get_market_fear_index():
     except:
         return False
 
+
+class FactorOrthogonalizer:
+    def __init__(self, weights_filepath='factor_weights.json'):
+        try:
+            with open(weights_filepath, 'r') as f:
+                self.weights = json.load(f)
+                print(f"factor_weights loaded from {weights_filepath}")
+        except Exception as e:
+            print(f"Error in factor_weights: {e}")
+            self.weights = {}
+
+
+    def clean_weights(self, symbol, raw_z, raw_c, raw_s):
+        if symbol not in self.weights:
+            return raw_z, raw_c, raw_s
+
+        w = self.weights[symbol]
+        orth_z = raw_z / w['sigma_Z']
+        sigma_c = w.get('Sigma_C_res', w.get('sigma_C_res', 1.0))
+        orth_c = (raw_c - w['alpha_C'] - (w['beta_C_Z'] * orth_z)) / sigma_c
+        orth_s = (raw_s - w['alpha_S'] - (w['beta_S_Z'] * orth_z) - (w['beta_S_C'] * orth_c)) / w['sigma_S_res']
+
+        return orth_z, orth_c, orth_s
+
+
+orthoganlizer = FactorOrthogonalizer()
 
 def get_total_short_exposure(account):
     short_val = abs(float(account.short_market_value))
@@ -560,13 +587,15 @@ def run_short_engine():
         if any(p.symbol == symbol for p in positions): continue
 
         is_earnings, earn_date = get_earnings_status(symbol)
-        price, z, sma_50, cmf_slope = get_technical_data(symbol)
+        price, raw_z, raw_sma , raw_cmf = get_technical_data(symbol)
 
-        if price is None:
+        if price is None or raw_z is None:
             continue
+        pure_z, pure_c, pure_s, = orthoganlizer.clean_weights(symbol, raw_z, raw_cmf, raw_sma)
 
-        print(f"🔍Check {symbol}: price: {price} | z: {z:.2f} | sma_50: {sma_50:.2f} | Earnings: {earn_date} | CMF_SLOPE: {cmf_slope:.2f}")
-
+        print(f"🔍Check {symbol}: price: {price} | z: {pure_z:.2f} | Vol: {pure_c: .2f} | Earnings: {earn_date} | CMF_SLOPE: {pure_s:.2f}")
+        signal ='hold'
+        reason = ''
         order_placed = False
 
         if is_earnings:
@@ -586,26 +615,27 @@ def run_short_engine():
 
         else:
             # TECHNICAL SHORT (Optimized Momentum Logic)
-            if price < sma_50:
-                # ENTRY CONDITION: Trend Breakdown (Z > -1.75 is almost always true if price < SMA50)
-                if z > ENTRY_Z_SHORT and cmf_slope < 0:
-                    neg_ratio, avg_score, flags = analyze_sentiment(symbol, mode='normal')
-
+            if pure_s < -1.5 and pure_c < 1.0 :
+                signal ='short'
+                reason = f"Structural Breakdown (Trend:{pure_s:.2f} | Vol:{pure_c:.2f})"
+                if pure_z > 1.0:
+                    signal = 'short'
+                    reason = f"Structural Breakdown (Trend:{pure_s:.2f} | Vol:{pure_c:.2f}"
                     if avg_score > 0.2:
                         print(f"✋ SKIP {symbol}: Breakdown but News is Good")
-                    else:
-                        print(f"Reading Tape for: {symbol}")
-                        tape_data = check_tape(symbol)
 
-                        if z > ENTRY_Z_SHORT and tape_data['signal'] == 'buy_wall':
-                            print(f"⛔ Abort Shorting {symbol} : {tape_data['reason']}")
-                            continue
+                        if signal == 'short':
+                            tape_data = check_tape(symbol)
+                            if tape_data['signal'] == 'buy_wall':
+                                print(f"⛔ ABORT SHORT {symbol}: {tape_data['reason']}")
+                                continue
+
 
                         can_proceed = check_opposing_direction(symbol, 'short')
                         if not can_proceed:
                             continue
 
-                        reason = f"Breakdown Short (Price < SMA50 & Z:{z:.2f} | CMF Slope: {cmf_slope:.2f})"
+                        reason = f"Breakdown Short"
                         print(f"📉 TECHNICAL SIGNAL: {symbol} | {reason}")
 
                         try:
