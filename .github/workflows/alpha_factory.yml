@@ -26,7 +26,7 @@ jobs:
           python-version: '3.9'
 
       - name: Install Dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements2.txt
 
       - name: Run Data Downloader (Generates JSON)
         run: python data_download.py
