@@ -508,8 +508,18 @@ def run_short_engine():
         # --- 🌾 HARVEST LOGIC ---
         # If Daily Goal Hit -> Close Winners immediately
         if harvest_mode and pct_profit > 0:
-            close_position(symbol, f"Harvest Win (+{pct_profit:.2%})")
-            short_count -= 1
+            try:
+                quote = api.get_latest_quote(symbol)
+                bid = float(quote.bp)
+            except Exception as e:
+                print(f"⚠️ Could Not Fetch Quote for: {symbol}. Error: {e}")
+                bid = current_price
+            real_pct_profit = (entry_price - bid) / entry_price
+            if real_pct_profit > 0:
+                close_position(symbol, f"Harvest Win (+{pct_profit:.2%})")
+                short_count -= 1
+            else:
+                print(f"Last Price for {symbol} is: ${current_price}. However, Bid is: ${bid:.2f}.")
             continue
 
         # --- 🛡️ THE RATCHET (Trailing Stop for Shorts) ---
