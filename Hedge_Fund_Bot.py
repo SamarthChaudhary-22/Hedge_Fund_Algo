@@ -498,11 +498,20 @@ def run_hedge_fund():
         # --- 🌾 HARVEST LOGIC ---
         # If we hit the daily goal, sell anything that is green.
         if harvest_mode and pct_profit > 0:
-            print(f"✅ HARVEST: Closing {symbol} (+{pct_profit:.2%}) to bank Daily Goal.")
-            place_order(symbol, qty, 'sell', current, 'harvest_win')
-            long_count -= 1
+            try:
+                quote = api.get_latest_quote(symbol)
+                bid = float(quote.bp)
+            except Exception as e:
+                print(f"⚠️ Could Not Fetch Quote for {symbol}: {e}")
+                bid = current
+            real_pct_profit = (bid - entry) / entry
+            if real_pct_profit > 0:
+                print(f"✅ HARVEST: Closing {symbol} (+{pct_profit:.2%}) to bank Daily Goal.")
+                place_order(symbol, qty, 'sell', current, 'harvest_win')
+                long_count -= 1
+            else:
+                print(f"Last price for {symbol}: ${current:.2f} . However, Bid is: ${bid:.2f}.")
             continue
-
         # --- 🛡️ THE RATCHET (Trailing Stop) ---
         # (Your Original Logic Preserved)
         stop_thresh = HARD_STOP_PCT  # Default -10%
