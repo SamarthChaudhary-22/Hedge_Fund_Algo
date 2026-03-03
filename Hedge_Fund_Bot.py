@@ -567,7 +567,7 @@ def run_hedge_fund():
         # --- 💰 TAKE PROFIT ---
         # Only take standard profit if NOT in Harvest Mode (Harvest handles greens anyway)
         if not harvest_mode:
-            _, z, _, _ = get_technical_data(symbol)
+            _, z, _, _, _ = get_technical_data(symbol)
             if z is None: continue
 
             if regime_map.get(symbol,
@@ -703,3 +703,4 @@ if __name__ == "__main__":
         print("Waiting 30 seconds...")
         time.sleep(30)
     print("--- 🔴 SESSION ENDING ---")
+
