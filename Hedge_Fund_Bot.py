@@ -98,7 +98,7 @@ def get_technical_data(symbol):
         bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=300, feed='iex').df
 
         if bars.empty or len(bars) < 50:
-            return None, None, None, None
+            return None, None, None, None, None
 
         # Data Prep
         closes = bars['close']
@@ -107,20 +107,24 @@ def get_technical_data(symbol):
         volumes = bars['volume']
         current_price = closes.iloc[-1]
 
+        bars['pct_change'] = bars['close'].pct_change()
+        current_daily_vol = bars['pct_change'].rolling(window=20).std().iloc[-1]
+
         # 2. BLIND Z-SCORE (Shifted by 1 Day)
         # We calculate mean/std on the HISTORY, excluding today to match backtest
         # We look at the last 20 days *before* today
         history = closes.iloc[:-1]
-        if len(history) < 20: return None, None, None, None
+        if len(history) < 20: return None, None, None, None, None
 
         mean_20 = history.iloc[-20:].mean()
         std_20 = history.iloc[-20:].std()
 
-        if std_20 == 0: return None, None, None, None
+        if std_20 == 0: return None, None, None, None, None
         z_score = (current_price - mean_20) / std_20
 
         # 3. SMA 50
         sma_50 = closes.iloc[-50:].mean()
+        sma_distance = (current_price - sma_50) / sma_50
 
         # 4. CMF (Chaikin Money Flow) & SLOPE
         # Money Flow Multiplier
@@ -133,17 +137,17 @@ def get_technical_data(symbol):
 
         # CMF Slope (Current - 10 days ago)
         # Ensure we have enough data for slope
-        if len(cmf) < 12: return None, None, None, None
+        if len(cmf) < 12: return None, None, None, None, None
 
         cmf_current = cmf.iloc[-1]
         cmf_prev = cmf.iloc[-11]  # 10 bars ago
         cmf_slope = cmf_current - cmf_prev
 
-        return current_price, z_score, sma_50, cmf_slope
+        return current_price, z_score, sma_distance, cmf_current, current_daily_vol
 
     except Exception as e:
-        # print(f"⚠️ Metrics Error {symbol}: {e}")
-        return None, None, None, None
+        print(f"⚠️ Metrics Error {symbol}: {e}")
+        return None, None, None, None, None
 
 def get_market_fear_index():
     try:
@@ -424,6 +428,35 @@ def check_oppossing_position(symbol, intended_direction):
             return False
 
 
+def calculate_dynamic_position(symbol, equity, price, daily_vol, pure_z, pure_c, held_symbols, max_positions=40):
+    base_dollar_alloc = (equity * 1.50) / max_positions
+    daily_target_vol = 0.015
+    safe_vol = max(daily_vol, 0.005)
+    vol_multiplier = daily_target_vol/daily_vol
+    vol_multiplier = max(0.5, min(vol_multiplier, 2.0))
+
+    conviction_mult = 1.0
+    z_strength = abs(pure_z)
+
+    if z_strength >= 3.5:
+        conviction_mult = 1.50
+    elif z_strength >= 2.5:
+        conviction_mult = 1.25
+    if abs(pure_c) > 2.0:
+        conviction_mult += 0.20
+
+    saturation_ratio = len(held_symbols) / max_positions
+    saturation_penalty = 1.0
+    if saturation_ratio >= 0.75:
+        saturation_penalty = 0.80
+
+    final_dollar_aloc = base_dollar_alloc * vol_multiplier * conviction_mult * saturation_penalty
+    shares = int(final_dollar_aloc/ price)
+
+    print(f"Size Calculated For {symbol}: Base: ${base_dollar_alloc: ,.0f} | Vol Mult: {vol_multiplier: .2f}x | Alpha Mult: {conviction_mult: .2f}x Final Allocation: ${final_dollar_aloc: ,.0f}")
+    return shares
+
+
 def run_hedge_fund():
     print(f"--- 🐺 Hedge Fund vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
     check_and_refresh_stale_orders()  #---Cleans up old limit orders
@@ -612,7 +645,7 @@ def run_hedge_fund():
         if i % 10 == 0: print(f"Scanned {i}/{len(all_tickers)}...", end='\r')
         time.sleep(0.5)
 
-        price, raw_z, raw_sma, raw_cmf = get_technical_data(symbol)
+        price, raw_z, raw_sma, raw_cmf, current_daily_vol = get_technical_data(symbol)
         if price is None: continue
         pure_z, pure_c, pure_s = orthoganolizer.clean_weights(symbol, raw_z, raw_cmf, raw_sma)
         print(f"🔍Checking {symbol} | Price: {price} | Z: {pure_z: .2f}σ | Vol: {pure_c:.2f}σ | Trend: {pure_s: .2f}σ ")
@@ -639,8 +672,16 @@ def run_hedge_fund():
             can_proceed = check_oppossing_position(symbol, 'long')
             if not can_proceed:
                 continue
-            target_amount = (equity * 1.50) / MAX_POSITIONS
-            shares = int(target_amount / price)
+            shares = calculate_dynamic_position(
+                symbol=symbol,
+                equity=equity,
+                price=price,
+                daily_vol=current_daily_vol,
+                pure_z=pure_z,
+                pure_c=pure_c,
+                held_symbols=held_symbols,
+                max_positions=MAX_POSITIONS
+            )
             if shares > 0:
                 print(f"\n🚀 {signal.upper()}: {symbol} | {reason}")
                 success = place_order(symbol, shares, signal, price, 'entry')
