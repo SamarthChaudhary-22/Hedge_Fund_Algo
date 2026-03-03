@@ -72,7 +72,7 @@ def get_technical_data(symbol):
         bars = api.get_bars(symbol, tradeapi.rest.TimeFrame.Day, start=start_date, limit=300, feed='iex').df
 
         if bars.empty or len(bars) < 50:
-            return None, None, None, None
+            return None, None, None, None, None
 
         # Data Prep
         closes = bars['close']
@@ -81,20 +81,24 @@ def get_technical_data(symbol):
         volumes = bars['volume']
         current_price = closes.iloc[-1]
 
+        bars['pct_change'] = bars['close'].pct_change()
+        current_daily_vol = bars['pct_change'].rolling(window=20).std().iloc[-1]
+
         # 2. BLIND Z-SCORE (Shifted by 1 Day)
         # We calculate mean/std on the HISTORY, excluding today to match backtest
         # We look at the last 20 days *before* today
         history = closes.iloc[:-1]
-        if len(history) < 20: return None, None, None, None
+        if len(history) < 20: return None, None, None, None, None
 
         mean_20 = history.iloc[-20:].mean()
         std_20 = history.iloc[-20:].std()
 
-        if std_20 == 0: return None, None, None, None
+        if std_20 == 0: return None, None, None, None, None
         z_score = (current_price - mean_20) / std_20
 
         # 3. SMA 50
         sma_50 = closes.iloc[-50:].mean()
+        sma_distance = (current_price - sma_50) / sma_50
 
         # 4. CMF (Chaikin Money Flow) & SLOPE
         # Money Flow Multiplier
@@ -107,17 +111,17 @@ def get_technical_data(symbol):
 
         # CMF Slope (Current - 10 days ago)
         # Ensure we have enough data for slope
-        if len(cmf) < 12: return None, None, None, None
+        if len(cmf) < 12: return None, None, None, None, None
 
         cmf_current = cmf.iloc[-1]
         cmf_prev = cmf.iloc[-11]  # 10 bars ago
         cmf_slope = cmf_current - cmf_prev
 
-        return current_price, z_score, sma_50, cmf_slope
+        return current_price, z_score, sma_distance, cmf_current, current_daily_vol
 
     except Exception as e:
-        # print(f"⚠️ Metrics Error {symbol}: {e}")
-        return None, None, None, None
+        print(f"⚠️ Metrics Error {symbol}: {e}")
+        return None, None, None, None, None
 
 
 def get_earnings_status(symbol):
@@ -466,6 +470,32 @@ def check_opposing_direction(symbol, intended_direction):
             print(f"Error Finding Position:{symbol}, {e}")
             return False
 
+def calculate_dynamic_position(symbol, equity, price, daily_vol, pure_z, pure_c, held_symbols, max_positions=30):
+    base_dollar_aloc = (equity * 1.50) / max_positions
+    daily_target_vol =  0.015
+    safe_vol = max(daily_vol, 0.005)
+    vol_multiplier = daily_target_vol/daily_vol
+
+    conviction_mult = 1.0
+    z_strength = abs(pure_z)
+
+    if z_strength >= 3.5:
+        conviction_mult = 1.50
+    elif z_strength >= 2.5:
+        conviction_mult = 1.25
+    if abs(pure_c) > 2.0:
+        conviction_mult += 0.20
+
+    saturation_ratio = len(held_symbols) / max_positions
+    saturation_penalty = 1.0
+
+    final_dollar_aloc = base_dollar_aloc * vol_multiplier * conviction_mult * saturation_penalty
+    shares = int(final_dollar_aloc / price)
+
+    print(f"Size Calculated For {symbol}: Base: ${base_dollar_aloc: ,.0f} | Vol Mult: {vol_multiplier: .2f}x | Alpha Mult: {conviction_mult: .2f}x Final Allocation: ${final_dollar_aloc: ,.0f}")
+    return shares
+
+
 def run_short_engine():
     print(f"--- 🐻 GRIZZLY SHORT ENGINE vFinal (Harvest Mode): {datetime.now(pytz.timezone('US/Eastern'))} ---")
     check_and_refresh_stale_orders()  #--cleans up old limit orders
@@ -490,6 +520,9 @@ def run_short_engine():
 
     # 1. MANAGE POSITIONS
     positions = api.list_positions()
+    open_orders = api.list_orders(status='open')
+    held_symbols = {p.symbol for p in positions}
+    held_symbols.update({o.symbol for o in open_orders})
     shorts = [p for p in positions if int(p.qty) < 0]
     short_count = len(shorts)
     print(f"📉 Current Short Positions: {short_count}/{MAX_SHORT_POSITIONS}")
@@ -597,7 +630,7 @@ def run_short_engine():
         if any(p.symbol == symbol for p in positions): continue
 
         is_earnings, earn_date = get_earnings_status(symbol)
-        price, raw_z, raw_sma , raw_cmf = get_technical_data(symbol)
+        price, raw_z, raw_sma , raw_cmf, current_daily_vol = get_technical_data(symbol)
 
         if price is None or raw_z is None:
             continue
@@ -633,30 +666,36 @@ def run_short_engine():
                     reason = f"Structural Breakdown (Trend:{pure_s:.2f} | Vol:{pure_c:.2f}"
                     if avg_score > 0.2:
                         print(f"✋ SKIP {symbol}: Breakdown but News is Good")
+                        continue
 
-                        if signal == 'short':
-                            tape_data = check_tape(symbol)
-                            if tape_data['signal'] == 'buy_wall':
-                                print(f"⛔ ABORT SHORT {symbol}: {tape_data['reason']}")
-                                continue
+                    if signal == 'short':
+                        tape_data = check_tape(symbol)
+                        if tape_data['signal'] == 'buy_wall':
+                            print(f"⛔ ABORT SHORT {symbol}: {tape_data['reason']}")
+                            continue
 
 
                         can_proceed = check_opposing_direction(symbol, 'short')
                         if not can_proceed:
                             continue
 
-                        reason = f"Breakdown Short"
-                        print(f"📉 TECHNICAL SIGNAL: {symbol} | {reason}")
+                        shares = calculate_dynamic_position(
+                            symbol=symbol,
+                            equity=equity,
+                            price=price,
+                            daily_vol=current_daily_vol,
+                            pure_z=pure_z,
+                            pure_c=pure_c,
+                            max_positions=MAX_SHORT_POSITIONS,
+                            held_symbols=held_symbols
+                        )
 
-                        try:
-                            trade = api.get_latest_trade(symbol)
-                            price = float(trade.price)
-                            qty = int((equity * current_pos_size) / price)
-                            if qty > 0:
-                                if place_short_order(symbol, qty, reason, stop_pct=current_stop_buffer):
-                                    order_placed = True
-                        except Exception as e:
-                            print(f"❌ Execution Error: {e}")
+                        if shares > 0:
+                            print(f"📉 TECHNICAL SIGNAL: {symbol} | {reason}")
+                            success = place_short_order(symbol, shares, reason, stop_pct=1.05)
+                            if success:
+                                short_count += 1
+                                held_symbols.add(symbol)
 
         if order_placed:
             short_count += 1
