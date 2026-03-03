@@ -578,7 +578,7 @@ def run_short_engine():
         # --- 💰 TAKE PROFIT (Normal Mode) ---
         # Optimized Strategy: Cover into the Crash (Z < -2.0)
         if not harvest_mode:
-            _, z, _, _ = get_technical_data(symbol)
+            _, z, _, _, _ = get_technical_data(symbol)
             if z is not None:
                 if z < EXIT_Z_SHORT and pct_profit > 0.01:
                     success = close_position(symbol, f"Panic Cover (Z:{z:.2f} < {EXIT_Z_SHORT})", qty)
@@ -713,3 +713,4 @@ if __name__ == "__main__":
         time.sleep(30)
 
     print("--- 🔴 SESSION ENDING ---")
+
