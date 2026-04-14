@@ -581,7 +581,7 @@ def run_short_engine():
             _, z, _, _, _ = get_technical_data(symbol)
             if z is not None:
                 if z < EXIT_Z_SHORT and pct_profit > 0.01:
-                    success = close_position(symbol, f"Panic Cover (Z:{z:.2f} < {EXIT_Z_SHORT})", qty)
+                    success = close_position(symbol, f"Panic Cover (Z:{z:.2f} < {EXIT_Z_SHORT})")
                     if success is False:
                         continue
                     short_count -= 1
